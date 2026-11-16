@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# builds
+.next/
+out/
+dist/
+build/
+.turbo/
+
+# env
+.env
+.env.*
+!.env.example
+
+# prisma (client is generated in CI/dev via `npm run db:generate`)
+packages/database/src/generated/
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+coverage/
+
+# local data
+docker-volumes/

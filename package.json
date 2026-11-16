@@ -1,0 +1,26 @@
+{
+  "name": "marketplace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@10.9.9",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "npm run db:generate -w @marketplace/database",
+    "db:migrate": "npm run db:migrate -w @marketplace/database",
+    "db:validate": "npm run db:validate -w @marketplace/database"
+  },
+  "devDependencies": {
+    "turbo": "2.3.3",
+    "typescript": "5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
