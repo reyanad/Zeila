@@ -20,6 +20,8 @@ export type MaintenanceJob = { kind: "fx-rates" } | { kind: "expire-orders" } | 
 
 export type NotificationJob =
   | { kind: "notification-email"; notificationId: string }
+  | { kind: "notification-push"; notificationId: string }
+  | { kind: "message-push"; messageId: string; recipientId: string }
   /** Sent a few minutes after a message, only if it is still unread. */
   | { kind: "message-email"; conversationId: string; recipientId: string };
 
@@ -90,7 +92,14 @@ export { DEFAULT_JOB_OPTIONS };
 /** Queue e-mail delivery for notifications and unread messages. Returns false when Redis is unreachable. */
 export async function enqueueNotificationJob(redisUrl: string, job: NotificationJob): Promise<boolean> {
   try {
-    const jobId = job.kind === "notification-email" ? `notification-${job.notificationId}` : `message-${job.conversationId}-${job.recipientId}`;
+    const jobId =
+      job.kind === "notification-email"
+        ? `notification-${job.notificationId}`
+        : job.kind === "notification-push"
+          ? `push-${job.notificationId}`
+          : job.kind === "message-push"
+            ? `message-push-${job.messageId}-${job.recipientId}`
+            : `message-${job.conversationId}-${job.recipientId}`;
     await producerQueue<NotificationJob>(redisUrl, QUEUE_NAMES.notifications).add(job.kind, job, {
       ...DEFAULT_JOB_OPTIONS,
       jobId,

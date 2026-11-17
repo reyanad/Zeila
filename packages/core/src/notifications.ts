@@ -52,7 +52,10 @@ export async function notify(inputs: NotifyInput | readonly NotifyInput[]): Prom
           href: input?.href ?? null,
           unread: unread.get(notification.userId) ?? 1,
         });
-        if (redisUrl && input?.email !== false) await enqueueNotificationJob(redisUrl, { kind: "notification-email", notificationId: notification.id });
+        if (redisUrl) {
+          await enqueueNotificationJob(redisUrl, { kind: "notification-push", notificationId: notification.id });
+          if (input?.email !== false) await enqueueNotificationJob(redisUrl, { kind: "notification-email", notificationId: notification.id });
+        }
       }),
     );
   } catch (error) {

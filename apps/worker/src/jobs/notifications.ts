@@ -2,8 +2,10 @@ import type { Processor } from "bullmq";
 import { prisma } from "@marketplace/database";
 import type { NotificationJob } from "@marketplace/jobs";
 import { sendEmail } from "../email";
+import { pushToUser } from "../push";
 
 export interface NotificationSettings {
+  expoAccessToken: string | undefined;
   resendApiKey: string | undefined;
   emailFrom: string;
   appUrl: string;
@@ -24,6 +26,25 @@ function absolute(appUrl: string, href: string | null): string {
 export function notificationProcessor(settings: NotificationSettings): Processor<NotificationJob, string> {
   return async (job) => {
     const data = job.data;
+    if (data.kind === "notification-push") {
+      const notification = await prisma.notification.findUnique({ where: { id: data.notificationId }, select: { userId: true, title: true, body: true, payload: true, readAt: true } });
+      if (!notification || notification.readAt) return "nothing to push";
+      const payload = (notification.payload ?? {}) as { href?: unknown };
+      const sent = await pushToUser(notification.userId, { title: notification.title, body: notification.body, data: { href: typeof payload.href === "string" ? payload.href : "/notifications", notificationId: data.notificationId } }, settings.expoAccessToken);
+      return `pushed to ${sent} device(s)`;
+    }
+    if (data.kind === "message-push") {
+      const message = await prisma.message.findUnique({ where: { id: data.messageId }, select: { conversationId: true, body: true, kind: true, sender: { select: { name: true } } } });
+      if (!message) return "gone";
+      const muted = await prisma.conversationParticipant.findUnique({ where: { conversationId_userId: { conversationId: message.conversationId, userId: data.recipientId } }, select: { isMuted: true } });
+      if (!muted || muted.isMuted) return "muted";
+      const sent = await pushToUser(
+        data.recipientId,
+        { title: message.sender.name ?? "New message", body: message.kind === "SERVICE_OFFER" ? `Custom offer: ${message.body ?? ""}` : message.body, data: { href: `/messages/${message.conversationId}`, conversationId: message.conversationId } },
+        settings.expoAccessToken,
+      );
+      return `pushed to ${sent} device(s)`;
+    }
     if (data.kind === "notification-email") {
       const notification = await prisma.notification.findUnique({
         where: { id: data.notificationId },
