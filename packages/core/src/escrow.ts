@@ -3,6 +3,7 @@ import { prisma } from "@marketplace/database";
 import { CheckoutError } from "./errors";
 import { rollupOrderStatus } from "./fulfillment";
 import { accounts, postEntry } from "./ledger";
+import { displayAmount, notifySubOrder } from "./notifications";
 
 /**
  * Escrow lifecycle per sub-order:
@@ -17,16 +18,16 @@ const OPEN_DISPUTES = ["OPEN", "AWAITING_SELLER", "AWAITING_BUYER", "UNDER_REVIE
 
 /** Release one escrow now. Returns false when it was not HELD (already released, frozen or refunded). */
 export async function releaseEscrowNow(escrowId: string, now: Date, reason: string): Promise<boolean> {
-  return prisma.$transaction(async (tx) => {
+  const released = await prisma.$transaction(async (tx) => {
     const escrow = await tx.escrow.findUnique({
       where: { id: escrowId },
       select: { id: true, amount: true, refunded: true, subOrder: { select: { id: true, orderId: true, storeId: true, currency: true, status: true } } },
     });
-    if (!escrow) return false;
+    if (!escrow) return null;
     // Partial refunds already came out of escrow; the store receives the rest.
     const net = Math.max(0, escrow.amount - escrow.refunded);
     const claimed = await tx.escrow.updateMany({ where: { id: escrow.id, status: "HELD" }, data: { status: "RELEASED", released: net, releasedAt: now } });
-    if (claimed.count === 0) return false;
+    if (claimed.count === 0) return null;
 
     const { subOrder } = escrow;
     if (net > 0) {
@@ -48,8 +49,15 @@ export async function releaseEscrowNow(escrowId: string, now: Date, reason: stri
     // Approved work, and delivered work the buyer never answered, is now paid.
     await tx.milestone.updateMany({ where: { orderItem: { subOrderId: subOrder.id }, status: { in: ["SUBMITTED", "APPROVED"] } }, data: { status: "RELEASED", releasedAt: now } });
     await rollupOrderStatus(tx, subOrder.orderId);
-    return true;
+    return { subOrderId: subOrder.id, net, currency: subOrder.currency };
   });
+  if (!released) return false;
+  await notifySubOrder(released.subOrderId, "seller", {
+    type: "ESCROW_RELEASED",
+    title: "Payment released for order {order}",
+    body: `${displayAmount(released.net, released.currency)} moved to your balance and will be paid out to your bank.`,
+  });
+  return true;
 }
 
 /** Release every escrow past its hold date whose goods or work were delivered and that has no open dispute. */

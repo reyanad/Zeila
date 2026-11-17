@@ -18,6 +18,10 @@ const schema = z.object({
   STRIPE_SECRET_KEY: optional,
   FX_RATES_URL: z.string().url().default("https://open.er-api.com/v6/latest/USD"),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
+  RESEND_API_KEY: optional,
+  EMAIL_FROM: z.string().default("Marketplace <no-reply@example.com>"),
+  NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  APP_NAME: z.string().default("Zeila"),
 });
 
 export type WorkerEnv = z.infer<typeof schema>;

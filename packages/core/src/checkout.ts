@@ -193,7 +193,8 @@ export async function buildQuote(params: QuoteParams): Promise<Quote> {
   };
 }
 
-function orderNumber(now: Date): string {
+/** Human-friendly order number, e.g. MP-20261117-3FA9C2 (unique index retried on collision). */
+export function orderNumber(now: Date): string {
   const date = now.toISOString().slice(0, 10).replace(/-/g, "");
   const suffix = randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
   return `MP-${date}-${suffix}`;

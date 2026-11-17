@@ -30,6 +30,7 @@ export const accounts = {
   fees: (currency: string): AccountRef => ({ code: `platform:fees:${currency}`, name: `Commission income (${currency})`, type: "INCOME", currency }),
   promotions: (currency: string): AccountRef => ({ code: `platform:promotions:${currency}`, name: `Platform promotions (${currency})`, type: "EXPENSE", currency }),
   refunds: (currency: string): AccountRef => ({ code: `platform:refunds:${currency}`, name: `Refunds absorbed (${currency})`, type: "EXPENSE", currency }),
+  chargebacks: (currency: string): AccountRef => ({ code: `platform:chargebacks:${currency}`, name: `Chargeback losses to recover (${currency})`, type: "EXPENSE", currency }),
   escrow: (storeId: string, currency: string): AccountRef => ({ code: `store:${storeId}:escrow:${currency}`, name: `Escrow for store ${storeId} (${currency})`, type: "LIABILITY", currency, storeId }),
   payable: (storeId: string, currency: string): AccountRef => ({ code: `store:${storeId}:payable:${currency}`, name: `Payable to store ${storeId} (${currency})`, type: "LIABILITY", currency, storeId }),
 };

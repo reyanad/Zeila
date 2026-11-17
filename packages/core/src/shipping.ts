@@ -4,6 +4,7 @@ import { isCarrierCode, trackingUrl } from "@marketplace/shared-types";
 import { sellerSubOrderId } from "./access";
 import { CheckoutError } from "./errors";
 import { rollupOrderStatus } from "./fulfillment";
+import { notifySubOrder } from "./notifications";
 import { refundSubOrder } from "./refunds";
 import { rollupSubOrderStatus } from "./status";
 
@@ -58,6 +59,11 @@ export async function shipSubOrder(sellerUserId: string, subOrderId: string, inp
     await rollupSubOrderStatus(tx, subOrder.id, now);
     await rollupOrderStatus(tx, subOrder.orderId);
   });
+  await notifySubOrder(subOrder.id, "buyer", {
+    type: "ORDER_SHIPPED",
+    title: "{store} shipped your order {order}",
+    body: input.trackingNumber ? `Tracking number: ${input.trackingNumber}` : "The seller is delivering it themselves.",
+  });
 }
 
 /** Add a tracking update; DELIVERED completes delivery of the shipment's items. */
@@ -81,6 +87,13 @@ export async function addTrackingEvent(sellerUserId: string, shipmentId: string,
       await rollupOrderStatus(tx, subOrder.orderId);
     }
   });
+  if (event.status === "DELIVERED") {
+    await notifySubOrder(shipment.subOrderId, "buyer", {
+      type: "ORDER_DELIVERED",
+      title: "Your order {order} was delivered",
+      body: "Check everything arrived as described. You can confirm, or report a problem while the seller's payment is held.",
+    });
+  }
 }
 
 /** Seller cannot fulfil: full refund to the buyer and stock back on the shelf. Only before shipping. */

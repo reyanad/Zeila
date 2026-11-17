@@ -70,7 +70,20 @@ split orders, Stripe Connect escrow, double-entry ledger.
       (`/orders/[id]/work/[itemId]`) with the buyer's brief (intake answers and files),
       encrypted deliverable uploads, revision rounds within the package allowance, approval
       that pays the seller, and auto-approval when the hold window ends.
-- [ ] Phase 8 — Socket.io messaging, notifications, dispute resolution center
+- [x] **Phase 8 — Messaging, notifications & disputes**: buyer–store threads (`/messages`)
+      with "Message the seller" on listings, stores and orders; anti-circumvention screening
+      (phone numbers incl. Ethiopian formats, e-mails, Telegram/WhatsApp links and handles are
+      hidden; Telebirr/CBE Birr/bank-transfer/"pay outside" talk in English and Amharic is
+      flagged with an escrow warning); custom offer cards that become an escrow-protected
+      service order on acceptance; Socket.io gateway (`apps/realtime`, Redis fan-out, signed
+      one-minute tickets) for live messages, typing and read receipts, with polling when it is
+      not configured; in-app notifications (`/notifications`, header badges) for every order,
+      payment, delivery, return, refund and case event, e-mailed through Resend by the worker
+      (unread-message e-mails throttled to one per 30 minutes, opt-out toggle); resolution
+      center (`/disputes`): buyer opens a case with evidence (escrow frozen), seller replies or
+      offers a refund the buyer can accept, either side can escalate, deadlines auto-escalate
+      or close; staff queue and decisions in `/admin/disputes`; Stripe chargebacks recorded as
+      card disputes with evidence submission, and the bank's decision applied to the ledger.
 - [ ] Phase 9 — Flash sales, affiliates, verified reviews, seller analytics
 - [ ] Phase 10 — Super-admin command center
 - [ ] Phase 11 — Expo mobile app
@@ -173,6 +186,25 @@ Files attached to orders (deliverables, intake uploads) are encrypted in the vau
 `attachments/<orderItemId>/`, up to 200 MB each, and only the buyer and seller of that item
 can download them.
 
+## Messaging, notifications & disputes (Phase 8)
+
+Run the realtime gateway next to the web app and worker:
+
+```bash
+npm run dev -w @marketplace/realtime-server   # Socket.io on REALTIME_PORT (4001)
+```
+
+It needs the same `AUTH_SECRET` and `REDIS_URL` as the web app; browsers reach it at
+`NEXT_PUBLIC_REALTIME_URL` (put it behind TLS in production, e.g. `wss://rt.<domain>`).
+Several gateway instances can run behind a load balancer: events travel through Redis.
+
+Case rules: the other side has 3 days to reply (`DISPUTE_RESPONSE_DAYS`). A seller who does
+not reply sends the case to staff; a buyer who does not reply closes it. Cases can be opened
+only while the seller's payment is still held; staff decisions refund from escrow and release
+the rest immediately. A lost chargeback takes the buyer's money back out of escrow; if the
+seller was already paid, it is booked to `platform:chargebacks` for recovery (Phase 10 shows
+these in the ledger view).
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -204,7 +236,11 @@ balancing rules, settlement for platform- and store-funded promos (every payment
 balances), licence key generation, and the download route end to end (encrypted vault →
 signed link → decrypted bytes match; expired and forged links refused). Phase 7 checked
 the refund split (full refunds unwind escrow, commission and promo exactly; partial refunds
-balance and never exceed escrow) and 12 sub-order status transitions.
+balance and never exceed escrow) and 12 sub-order status transitions. Phase 8 checked the
+chat screening (8 cases: Ethiopian and international phone numbers, obfuscated e-mails,
+Telegram links, Amharic payment terms; order numbers, dates and prices untouched), realtime
+tickets (valid, wrong secret, expired, forged), e-mail HTML escaping, module loading of the
+worker, and the gateway (health check; a forged ticket is refused).
 
 ## Needs owner input
 
@@ -224,6 +260,8 @@ balance and never exceed escrow) and 12 sub-order status transitions.
 - **Return window.** Default chosen: the escrow hold period (`escrow_hold_days`, 3 days after
   delivery). Many marketplaces use 7–14 days for physical goods; a longer window delays seller
   payouts by the same amount.
+- **Disputes after payout.** Default chosen: buyers can open a case only while the seller's
+  payment is held (delivery + `escrow_hold_days`). After that, support handles it manually.
 - **KYC review** happens in the admin command center (Phase 10). Until then, submissions stay
   `PENDING` and stores stay in `PENDING_REVIEW`.
 

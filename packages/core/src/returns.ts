@@ -3,6 +3,8 @@ import { prisma } from "@marketplace/database";
 import { isReturnReason, RETURN_REASONS } from "@marketplace/shared-types";
 import { orderItemForUser, sellerSubOrderId } from "./access";
 import { CheckoutError } from "./errors";
+import { freezeSubOrderEscrow, OPEN_RETURN_STATUSES, unfreezeSubOrderIfClear } from "./holds";
+import { notifySubOrder } from "./notifications";
 import { refundSubOrder } from "./refunds";
 
 /**
@@ -11,17 +13,7 @@ import { refundSubOrder } from "./refunds";
  * freezes the escrow; the refund comes out of it.
  */
 
-const OPEN_RMA = ["REQUESTED", "APPROVED", "AWAITING_RETURN", "RECEIVED"] as const;
-
-async function unfreezeIfClear(subOrderId: string): Promise<void> {
-  const [openReturns, openDisputes] = await Promise.all([
-    prisma.rmaRequest.count({ where: { orderItem: { subOrderId }, status: { in: [...OPEN_RMA] } } }),
-    prisma.dispute.count({ where: { subOrderId, status: { in: ["OPEN", "AWAITING_SELLER", "AWAITING_BUYER", "UNDER_REVIEW"] } } }),
-  ]);
-  if (openReturns === 0 && openDisputes === 0) {
-    await prisma.escrow.updateMany({ where: { subOrderId, status: "FROZEN", frozenReason: { startsWith: "Return" } }, data: { status: "HELD", frozenAt: null, frozenReason: null } });
-  }
-}
+const OPEN_RMA = OPEN_RETURN_STATUSES;
 
 export async function requestReturn(buyerId: string, orderItemId: string, input: { reason: string; details: string; quantity: number }, now: Date): Promise<string> {
   const { item, role } = await orderItemForUser(buyerId, orderItemId);
@@ -44,12 +36,10 @@ export async function requestReturn(buyerId: string, orderItemId: string, input:
       data: { orderItemId: item.id, requesterId: buyerId, reason, details: input.details.slice(0, 2000) || null, quantity: input.quantity },
       select: { id: true },
     });
-    await tx.escrow.updateMany({
-      where: { id: escrow.id, status: "HELD" },
-      data: { status: "FROZEN", frozenAt: now, frozenReason: `Return requested: ${RETURN_REASONS[reason]}` },
-    });
+    await freezeSubOrderEscrow(tx, item.subOrderId, `Return requested: ${RETURN_REASONS[reason]}`, now);
     return created;
   });
+  await notifySubOrder(item.subOrderId, "seller", { type: "RETURN_REQUESTED", title: "Return requested on order {order}", body: `${item.titleSnapshot}: ${RETURN_REASONS[reason]}` });
   return rma.id;
 }
 
@@ -70,7 +60,12 @@ export async function decideReturn(sellerUserId: string, rmaId: string, approve:
     where: { id: rma.id },
     data: approve ? { status: "APPROVED", sellerNote: note || null, decidedAt: now } : { status: "REJECTED", resolution: "REJECTED", sellerNote: note || null, decidedAt: now },
   });
-  if (!approve) await unfreezeIfClear(rma.orderItem.subOrderId);
+  if (!approve) await unfreezeSubOrderIfClear(rma.orderItem.subOrderId);
+  await notifySubOrder(rma.orderItem.subOrderId, "buyer", {
+    type: "RETURN_UPDATED",
+    title: approve ? "{store} approved your return" : "{store} declined your return",
+    body: note || (approve ? "Send the item back and add the tracking number on your order page." : "Open a dispute from your order page if you disagree."),
+  });
 }
 
 export async function submitReturnTracking(buyerId: string, rmaId: string, trackingNumber: string): Promise<void> {
@@ -98,7 +93,7 @@ export async function completeReturn(stripe: Stripe | null, sellerUserId: string
     now,
   );
   await prisma.rmaRequest.update({ where: { id: rma.id }, data: { status: "REFUNDED", resolution: "REFUND", refundAmount: input.refundAmount, decidedAt: now } });
-  await unfreezeIfClear(rma.orderItem.subOrderId);
+  await unfreezeSubOrderIfClear(rma.orderItem.subOrderId);
 }
 
 /** Largest refund a return can carry: the returned share of the item, never more than what is left. */

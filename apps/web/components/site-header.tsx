@@ -3,6 +3,8 @@ import { isStaff } from "@marketplace/shared-types";
 import { buttonVariants } from "@marketplace/ui";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { CurrencySwitcher } from "@/components/storefront/currency-switcher";
+import { unreadConversationCount } from "@marketplace/core";
+import { prisma } from "@marketplace/database";
 import { getCurrentUser } from "@/lib/auth/session";
 import { readCartCount } from "@/lib/cart-session";
 import { getViewerCurrency } from "@/lib/storefront/fx";
@@ -11,6 +13,10 @@ const navLink = "text-sm font-medium text-muted-foreground transition-colors hov
 
 export async function SiteHeader() {
   const [user, currency, cartCount] = await Promise.all([getCurrentUser(), getViewerCurrency(), readCartCount()]);
+  const [unreadMessages, unreadNotifications] = user
+    ? await Promise.all([unreadConversationCount(user.id), prisma.notification.count({ where: { userId: user.id, readAt: null } })])
+    : [0, 0];
+  const badge = (count: number) => (count > 0 ? <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">{count > 99 ? "99+" : count}</span> : null);
 
   return (
     <header className="border-b border-border bg-card">
@@ -33,7 +39,7 @@ export async function SiteHeader() {
         <nav aria-label="Main" className="flex items-center gap-4">
           <CurrencySwitcher current={currency} />
           <Link href="/cart" className={navLink} aria-label={`Cart, ${cartCount} item${cartCount === 1 ? "" : "s"}`}>
-            Cart{cartCount > 0 ? <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">{cartCount}</span> : null}
+            Cart{badge(cartCount)}
           </Link>
           {user ? (
             <>
@@ -53,6 +59,12 @@ export async function SiteHeader() {
               )}
               <Link href="/orders" className={navLink}>
                 Orders
+              </Link>
+              <Link href="/messages" className={navLink} aria-label={`Messages, ${unreadMessages} unread`}>
+                Messages{badge(unreadMessages)}
+              </Link>
+              <Link href="/notifications" className={navLink} aria-label={`Notifications, ${unreadNotifications} unread`}>
+                Alerts{badge(unreadNotifications)}
               </Link>
               <Link href="/account" className={navLink}>
                 Account

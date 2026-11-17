@@ -57,6 +57,7 @@ export default async function SellerOrderPage({ params }: { params: Promise<{ id
       shippingTotal: true,
       order: { select: { orderNumber: true, placedAt: true, shippingAddress: true, buyer: { select: { name: true } } } },
       escrow: { select: { status: true, amount: true, refunded: true, holdUntil: true, frozenReason: true } },
+      disputes: { where: { status: { in: ["OPEN", "AWAITING_SELLER", "AWAITING_BUYER", "UNDER_REVIEW"] } }, select: { id: true, kind: true, respondBy: true }, take: 1 },
       shipments: { orderBy: { createdAt: "asc" }, select: { id: true, carrier: true, trackingNumber: true, trackingUrl: true, status: true, events: true } },
       items: {
         orderBy: { id: "asc" },
@@ -100,6 +101,15 @@ export default async function SellerOrderPage({ params }: { params: Promise<{ id
         </div>
         <Badge tone={status.tone}>{status.label}</Badge>
       </div>
+
+      {subOrder.disputes[0] ? (
+        <Alert tone="danger" title={subOrder.disputes[0].kind === "CHARGEBACK" ? "Card dispute open" : "The buyer opened a case"}>
+          {subOrder.disputes[0].respondBy ? `Reply by ${subOrder.disputes[0].respondBy.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}. ` : ""}
+          <Link href={`/disputes/${subOrder.disputes[0].id}`} className="font-medium underline underline-offset-4">
+            Open the case
+          </Link>
+        </Alert>
+      ) : null}
 
       {escrow ? (
         <Alert tone={escrow.status === "FROZEN" ? "warning" : "info"} title="Your payment">

@@ -9,10 +9,10 @@ export interface UploadedFile {
   sizeBytes: number;
 }
 
-function upload(orderItemId: string, file: File, onProgress: (fraction: number) => void): Promise<UploadedFile> {
+function upload(endpoint: string, file: File, onProgress: (fraction: number) => void): Promise<UploadedFile> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `/api/orders/${orderItemId}/files`);
+    request.open("POST", endpoint);
     request.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
     request.setRequestHeader("Content-Type", "application/octet-stream");
     request.upload.onprogress = (event) => event.lengthComputable && onProgress(event.loaded / event.total);
@@ -30,9 +30,13 @@ function upload(orderItemId: string, file: File, onProgress: (fraction: number) 
   });
 }
 
-/** Uploads files for an order item (encrypted in the vault) and reports their signed tokens. */
-export function FileUploader({ orderItemId, label, files, onChange, multiple = true }: {
-  orderItemId: string;
+/**
+ * Uploads files (encrypted in the vault) and reports their signed tokens.
+ * Pass `orderItemId` for order files or `endpoint` for another upload route.
+ */
+export function FileUploader({ orderItemId, endpoint, label, files, onChange, multiple = true }: {
+  orderItemId?: string;
+  endpoint?: string;
   label: string;
   files: UploadedFile[];
   onChange: (files: UploadedFile[]) => void;
@@ -48,7 +52,7 @@ export function FileUploader({ orderItemId, label, files, onChange, multiple = t
     for (const file of Array.from(list).slice(0, multiple ? 10 : 1)) {
       setProgress(0);
       try {
-        added.push(await upload(orderItemId, file, setProgress));
+        added.push(await upload(endpoint ?? `/api/orders/${orderItemId ?? ""}/files`, file, setProgress));
       } catch (uploadError) {
         setError(`${file.name}: ${uploadError instanceof Error ? uploadError.message : "failed"}`);
         break;
