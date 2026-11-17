@@ -1,5 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
+import Stripe from "stripe";
+import { expireStaleOrders } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type SearchJob } from "@marketplace/jobs";
 import { createSearchClient, ensureListingsIndex } from "@marketplace/search";
@@ -33,6 +35,12 @@ async function main(): Promise<void> {
 
   const searchQueue = new Queue<SearchJob>(QUEUE_NAMES.search, { connection });
   const maintenanceQueue = new Queue<MaintenanceJob>(QUEUE_NAMES.maintenance, { connection });
+  const stripe = env.STRIPE_SECRET_KEY && !env.STRIPE_SECRET_KEY.endsWith("_xxx") ? new Stripe(env.STRIPE_SECRET_KEY, { maxNetworkRetries: 2 }) : null;
+  await maintenanceQueue.upsertJobScheduler(
+    "expire-orders",
+    { every: 5 * 60_000 },
+    { name: "expire-orders", data: { kind: "expire-orders" }, opts: { ...DEFAULT_JOB_OPTIONS, attempts: 1 } },
+  );
   await maintenanceQueue.upsertJobScheduler(
     "fx-rates-daily",
     { pattern: "17 3 * * *" },
@@ -43,6 +51,10 @@ async function main(): Promise<void> {
     QUEUE_NAMES.maintenance,
     async (job) => {
       switch (job.data.kind) {
+        case "expire-orders": {
+          const cancelled = await expireStaleOrders(stripe, new Date());
+          return `expired ${cancelled} unpaid orders`;
+        }
         case "fx-rates": {
           const fx = await refreshFxRates(env.FX_RATES_URL);
           // Cross-currency sort prices depend on the rates.
