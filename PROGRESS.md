@@ -22,7 +22,15 @@ split orders, Stripe Connect escrow, double-entry ledger.
   Stripe Connect Express payouts); idempotent Stripe webhook inbox (`WebhookEvent`) at
   `/api/webhooks/stripe` and `/api/webhooks/stripe-connect`; store status derived from
   KYC + payout readiness (`DRAFT` → `PENDING_REVIEW` → `ACTIVE`).
-- [ ] Phase 3 — Vendor Studio & polymorphic listing builder (adaptive Zod schemas)
+- [x] **Phase 3 — Vendor Studio**: `/seller/studio` with listings table and quick status
+  actions; one adaptive builder for all three types, validated by shared Zod schemas
+  (`listingInputSchema` + `publishIssues`). Physical: option axes → generated SKU matrix,
+  per-warehouse stock, compare-at prices, listing-level wholesale discount tiers
+  materialised per SKU. Digital: files streamed into the vault (SHA-256, AES-256-GCM,
+  no buffering), signed upload tickets, licence-key and download-limit settings.
+  Services: Basic/Standard/Premium packages and a buyer intake-form builder. Photos are
+  re-encoded to WebP (EXIF/GPS stripped). Warehouses page, category seed, publish rules
+  (store must be active; pre/post moderation via `listing_review_mode` setting).
 - [ ] Phase 4 — Meilisearch sync workers, pgvector recommendations, SSR storefront
 - [ ] Phase 5 — Unified multi-type cart, tax/shipping engine, promo codes, Stripe split checkout
 - [ ] Phase 6 — Idempotent webhooks, ledger engine, digital fulfillment, BullMQ escrow cron
@@ -68,6 +76,23 @@ stripe listen --forward-connect-to localhost:3000/api/webhooks/stripe-connect  #
 Put each printed `whsec_...` secret in `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_WEBHOOK_SECRET`.
 Subscribe the Connect endpoint to `account.updated`, `capability.updated` and
 `account.application.deauthorized`.
+
+## Environment variables added in Phase 3
+
+| Variable | Purpose |
+| --- | --- |
+| `PUBLIC_ASSET_BASE_URL` | Public URL of the public bucket (R2 custom domain). Empty = images served through `/api/assets`. |
+| `DIGITAL_UPLOAD_MAX_MB` | Largest digital product upload in MB (default 500). |
+
+After the first migration, load the starter categories: `npm run db:seed`.
+
+## Verification status
+
+Each phase is verified with `prisma validate`, `tsc --noEmit` in every workspace and
+`next build`. Phase 3 also ran runtime checks of the listing schemas and an encrypted
+stream round-trip (5 MB upload → vault → ranged decrypt; tampering rejected). The build
+environment cannot download Prisma's native engines, so nothing has yet run against a
+live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + pgvector.
 
 ## Needs owner input
 
