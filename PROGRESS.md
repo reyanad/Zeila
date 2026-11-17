@@ -39,7 +39,15 @@ split orders, Stripe Connect escrow, double-entry ledger.
   picker (stock, compare-at, wholesale tiers), service package tabs and digital file
   details, `/store/[slug]`, similar listings (pgvector cosine, category fallback),
   currency switcher with approximate conversions, JSON-LD, sitemap and robots.
-- [ ] Phase 5 — Unified multi-type cart, tax/shipping engine, promo codes, Stripe split checkout
+- [x] **Phase 5 — Cart & checkout**: `packages/core` with a pure pricing engine (wholesale
+  tiers, promo allocation by largest remainder, per-store weight-based shipping from seller
+  shipping profiles, destination tax table), guest + account carts (merged at sign-in),
+  promo-code validation (dates, currency, usage and per-buyer limits), split orders (one
+  sub-order per store with platform fee), race-free stock reservations, 30-minute payment
+  hold with a worker sweep that cancels expired orders, Stripe PaymentIntent (separate
+  charges and transfers via `transfer_group`) with the Payment Element, payment webhooks
+  (late or mismatched payments are refunded automatically), free-order path, cart,
+  checkout, payment and order pages, seller shipping-rates page.
 - [ ] Phase 6 — Idempotent webhooks, ledger engine, digital fulfillment, BullMQ escrow cron
 - [ ] Phase 7 — Fulfillment: carrier tracking/RMA, encrypted vault + license API, milestone workspace
 - [ ] Phase 8 — Socket.io messaging, notifications, dispute resolution center
@@ -93,6 +101,15 @@ Subscribe the Connect endpoint to `account.updated`, `capability.updated` and
 
 After the first migration, load the starter categories: `npm run db:seed`.
 
+## Checkout setup (Phase 5)
+
+- `STRIPE_PUBLISHABLE_KEY` is read on the server and handed to the payment form.
+- Subscribe the platform webhook (`/api/webhooks/stripe`) to `payment_intent.succeeded`,
+  `payment_intent.payment_failed` and `payment_intent.processing`.
+- Sellers set shipping rates under **Studio → Shipping** before publishing physical products.
+- Tax rates are a platform setting (`tax_rates`); until an administrator configures them,
+  no tax is charged (admin UI arrives in Phase 10).
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -118,6 +135,8 @@ environment cannot download Prisma's native engines, so nothing has yet run agai
 live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + pgvector.
 Phase 4 also module-loaded the worker under `tsx` (which caught an ESM/CommonJS export
 bug that type checking missed) and checked document building and currency conversion.
+Phase 5 ran 16 unit checks of the pricing engine (rounding, promo allocation, weight-based
+and free shipping, tax on shipping, international blocking).
 
 ## Needs owner input
 
@@ -128,6 +147,12 @@ bug that type checking missed) and checked document building and currency conver
   Telebirr / CBE Birr / Chapa would need a second payment provider. Decide: (a) register the
   platform entity in the US and use Stripe for card payments, (b) add a Chapa adapter for
   local ETB payments alongside Stripe, or (c) both. Default chosen: (a), Stripe only.
+- **Tax.** Configure the `tax_rates` table per destination country (for Ethiopia, the VAT
+  rate and whether it applies to services and shipping), and decide who remits it. Default
+  chosen: prices are tax-exclusive, tax is added at checkout and passed to the seller.
+- **Promo funding.** Default chosen: store codes are paid for by the store (the platform fee
+  is charged on the discounted amount); platform-wide codes are paid for by the platform
+  (sellers are paid as if no discount applied).
 - **KYC review** happens in the admin command center (Phase 10). Until then, submissions stay
   `PENDING` and stores stay in `PENDING_REVIEW`.
 
