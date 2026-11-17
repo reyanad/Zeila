@@ -26,6 +26,9 @@ const envSchema = z.object({
   GITHUB_CLIENT_SECRET: optionalString,
 
   REDIS_URL: optionalString,
+  MEILI_HOST: optionalString,
+  MEILI_MASTER_KEY: optionalString,
+  NEXT_PUBLIC_DEFAULT_CURRENCY: z.string().default("USD"),
 
   RESEND_API_KEY: optionalString,
   EMAIL_FROM: z.string().default("Marketplace <no-reply@example.com>"),
@@ -169,4 +172,35 @@ export function publicAssetUrl(key: string): string {
 
 export function digitalUploadMaxBytes(): number {
   return getEnv().DIGITAL_UPLOAD_MAX_MB * 1024 * 1024;
+}
+
+/**
+ * Public site origin for canonical URLs, sitemaps and Open Graph tags. Reads
+ * only NEXT_PUBLIC_APP_URL, so static metadata routes build without secrets.
+ */
+export function siteUrl(path = "/"): string {
+  const raw = process.env.NEXT_PUBLIC_APP_URL;
+  let origin = "http://localhost:3000";
+  if (raw) {
+    try {
+      origin = new URL(raw).origin;
+    } catch {
+      origin = "http://localhost:3000";
+    }
+  }
+  return new URL(path, origin).toString();
+}
+
+export function absoluteUrl(pathOrUrl: string): string {
+  return /^https?:\/\//.test(pathOrUrl) ? pathOrUrl : siteUrl(pathOrUrl);
+}
+
+export interface MeiliSettings {
+  host: string;
+  apiKey: string;
+}
+
+export function meiliSettings(): MeiliSettings | null {
+  const { MEILI_HOST: host, MEILI_MASTER_KEY: apiKey } = getEnv();
+  return host && apiKey ? { host, apiKey } : null;
 }

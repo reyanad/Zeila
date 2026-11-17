@@ -10,6 +10,7 @@ import { formError, formSuccess, type FormState } from "@/lib/form-state";
 import { storeListingImage } from "@/lib/images";
 import { describeRetry, rateLimit } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request";
+import { scheduleSearchSync } from "@/lib/search-sync";
 import {
   changeListingStatus,
   loadListingForEditor,
@@ -78,6 +79,7 @@ export async function saveListingAction(payload: unknown, listingId: string | nu
     revalidatePath(STUDIO_PATH);
     revalidatePath(`${STUDIO_PATH}/listings/${result.id}`);
   }
+  scheduleSearchSync({ kind: "listing", listingId: result.id });
   const stored = await loadListingForEditor(lookup.store.id, result.id);
   if (!stored) return { ok: false, message: "The listing was saved but could not be reloaded. Refresh the page." };
   const imageUrls = Object.fromEntries(stored.input.images.map((image) => [image.key, publicAssetUrl(image.key)]));
@@ -89,6 +91,7 @@ export async function listingStatusAction(listingId: string, action: ListingStat
   if (!lookup.ok) return { ok: false, message: lookup.message };
   const result = await changeListingStatus(lookup.store, listingId, action);
   if (result.ok) {
+    scheduleSearchSync({ kind: "listing", listingId });
     await recordAudit({
       actorId: lookup.userId,
       action: `listing.${action}`,

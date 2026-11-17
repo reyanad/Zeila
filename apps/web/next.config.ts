@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@marketplace/ui", "@marketplace/shared-types", "@marketplace/database"],
+  // Load queue clients from node_modules at runtime instead of bundling them
+  // (BullMQ has optional backends and dynamic requires webpack cannot follow).
+  serverExternalPackages: ["bullmq", "ioredis"],
+  transpilePackages: [
+    "@marketplace/ui",
+    "@marketplace/shared-types",
+    "@marketplace/database",
+    "@marketplace/search",
+    "@marketplace/jobs",
+  ],
   experimental: {
     // KYC uploads: up to four documents of 10 MB each in one server action.
     serverActions: {
