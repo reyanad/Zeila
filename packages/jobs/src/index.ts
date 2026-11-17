@@ -8,6 +8,7 @@ import { Redis, type RedisOptions } from "ioredis";
 export const QUEUE_NAMES = {
   search: "search-index",
   maintenance: "maintenance",
+  notifications: "notifications",
 } as const;
 
 export type SearchJob =
@@ -15,7 +16,12 @@ export type SearchJob =
   | { kind: "store"; storeId: string }
   | { kind: "all" };
 
-export type MaintenanceJob = { kind: "fx-rates" } | { kind: "expire-orders" } | { kind: "release-escrow" };
+export type MaintenanceJob = { kind: "fx-rates" } | { kind: "expire-orders" } | { kind: "release-escrow" } | { kind: "disputes" };
+
+export type NotificationJob =
+  | { kind: "notification-email"; notificationId: string }
+  /** Sent a few minutes after a message, only if it is still unread. */
+  | { kind: "message-email"; conversationId: string; recipientId: string };
 
 /** Options for connections used by BullMQ workers (blocking commands need no retry cap). */
 export const WORKER_REDIS_OPTIONS: RedisOptions = { maxRetriesPerRequest: null, enableReadyCheck: false };
@@ -80,3 +86,19 @@ export async function enqueueSearchJob(redisUrl: string, job: SearchJob): Promis
 }
 
 export { DEFAULT_JOB_OPTIONS };
+
+/** Queue e-mail delivery for notifications and unread messages. Returns false when Redis is unreachable. */
+export async function enqueueNotificationJob(redisUrl: string, job: NotificationJob): Promise<boolean> {
+  try {
+    const jobId = job.kind === "notification-email" ? `notification-${job.notificationId}` : `message-${job.conversationId}-${job.recipientId}`;
+    await producerQueue<NotificationJob>(redisUrl, QUEUE_NAMES.notifications).add(job.kind, job, {
+      ...DEFAULT_JOB_OPTIONS,
+      jobId,
+      delay: job.kind === "message-email" ? 5 * 60_000 : 0,
+    });
+    return true;
+  } catch (error) {
+    console.error("[jobs] could not enqueue notification job", error);
+    return false;
+  }
+}
