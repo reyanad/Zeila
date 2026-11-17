@@ -139,7 +139,7 @@ cp .env.example .env          # fill values; defaults work for docker dev
 docker compose up -d          # postgres (pgvector), redis, meilisearch
 npm install
 npm run db:generate           # prisma client
-npm run db:migrate            # first migration (named: init)
+npm run db:migrate            # applies the migrations (and creates new ones after schema changes)
 npm run dev                   # turbo dev (web on :3000)
 ```
 
