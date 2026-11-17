@@ -38,6 +38,11 @@ export function QuoteItems({ quote, editable, final }: { quote: Quote; editable:
                     {item.quantity} × {money(item.unitPrice)}
                     {item.unitPrice !== item.priceAtAdd && !item.problem ? " (price updated)" : ""}
                   </span>
+                  {item.flash ? (
+                    <span className="text-xs font-medium text-destructive">
+                      {item.flash.name}: {Math.round(item.flash.discountBps / 100)}% off until {new Date(item.flash.endsAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}
+                    </span>
+                  ) : null}
                   {item.problem ? <span className="text-xs font-medium text-destructive">{item.problem}</span> : null}
                 </div>
                 <div className="flex flex-col items-end gap-1">
