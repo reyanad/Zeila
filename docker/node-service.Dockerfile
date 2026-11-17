@@ -4,6 +4,8 @@
 FROM node:22-bookworm-slim AS base
 ENV TURBO_TELEMETRY_DISABLED=1
 WORKDIR /app
+# Prisma's CLI needs OpenSSL to pick the right engine build.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 FROM base AS prune
 ARG APP
