@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AffiliateTracker } from "@/components/growth/affiliate-tracker";
 import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
 import { getCurrentUser } from "@/lib/auth/session";
@@ -19,6 +20,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <body className="min-h-screen antialiased">
         <RealtimeProvider url={user ? realtimeUrl() : null}>
           <SiteHeader />
+          <AffiliateTracker />
           <main>{children}</main>
         </RealtimeProvider>
       </body>

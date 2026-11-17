@@ -38,6 +38,9 @@ export async function SiteHeader() {
         </form>
         <nav aria-label="Main" className="flex items-center gap-4">
           <CurrencySwitcher current={currency} />
+          <Link href="/deals" className={navLink}>
+            Deals
+          </Link>
           <Link href="/cart" className={navLink} aria-label={`Cart, ${cartCount} item${cartCount === 1 ? "" : "s"}`}>
             Cart{badge(cartCount)}
           </Link>

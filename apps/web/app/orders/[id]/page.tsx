@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@marketplace/database";
 import { Alert, Badge, buttonVariants } from "@marketplace/ui";
 import { RETURN_REASONS, isReturnReason } from "@marketplace/shared-types";
+import { ReviewForm } from "@/components/growth/review-form";
 import { ContactSellerButton } from "@/components/messages/contact-seller-button";
 import { ConfirmReceivedButton } from "@/components/orders/confirm-received-button";
 import { PaymentPending } from "@/components/orders/payment-pending";
@@ -62,6 +63,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
               listingType: true,
               status: true,
               rmaRequests: { orderBy: { createdAt: "desc" }, select: { id: true, reason: true, status: true, sellerNote: true, refundAmount: true } },
+              reviews: { where: { authorId: user.id }, select: { rating: true, title: true, body: true, status: true } },
               downloadGrants: { select: { id: true, downloadsUsed: true, digitalAsset: { select: { fileName: true, downloadLimit: true } } } },
               licenseKey: { select: { key: true, status: true, activationsLimit: true } },
             },
@@ -176,6 +178,15 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                     (subOrder.escrow?.status === "HELD" || subOrder.escrow?.status === "FROZEN") &&
                     !item.rmaRequests.some((rma) => OPEN_RETURN.includes(rma.status)) ? (
                       <ReturnRequestForm orderId={order.id} orderItemId={item.id} maxQuantity={item.quantity} />
+                    ) : null}
+                    {subOrder.status !== "REFUNDED" &&
+                    (item.listingType === "SERVICE" ? item.status === "COMPLETED" : item.status === "DELIVERED" || item.status === "COMPLETED") &&
+                    item.reviews[0]?.status !== "REJECTED" ? (
+                      <ReviewForm
+                        orderId={order.id}
+                        orderItemId={item.id}
+                        initial={item.reviews[0] ? { rating: item.reviews[0].rating, title: item.reviews[0].title ?? "", body: item.reviews[0].body ?? "" } : null}
+                      />
                     ) : null}
                     {item.licenseKey ? (
                       <div className="rounded-md border border-border px-3 py-2">
