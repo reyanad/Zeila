@@ -1,0 +1,85 @@
+# Production stack for a single server (VPS). Caddy obtains HTTPS certificates
+# automatically for DOMAIN and the realtime subdomain.
+#   cp deploy/.env.production.example deploy/.env.production   # fill it in
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d
+name: zeila
+
+x-app-env: &app-env
+  env_file: .env.production
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis:/data]
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    volumes: [meili:/meili_data]
+
+  migrate:
+    <<: *app-env
+    image: ghcr.io/${GITHUB_OWNER}/zeila-worker:${IMAGE_TAG:-latest}
+    restart: "no"
+    working_dir: /app/packages/database
+    command: ["npx", "prisma", "migrate", "deploy"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  web:
+    <<: *app-env
+    image: ghcr.io/${GITHUB_OWNER}/zeila-web:${IMAGE_TAG:-latest}
+    volumes: [uploads:/app/.data]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_started }
+
+  worker:
+    <<: *app-env
+    image: ghcr.io/${GITHUB_OWNER}/zeila-worker:${IMAGE_TAG:-latest}
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  realtime:
+    <<: *app-env
+    image: ghcr.io/${GITHUB_OWNER}/zeila-realtime:${IMAGE_TAG:-latest}
+    depends_on: [redis]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web, realtime]
+
+volumes:
+  postgres:
+  redis:
+  meili:
+  uploads:
+  caddy_data:
+  caddy_config:

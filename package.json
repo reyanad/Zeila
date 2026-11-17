@@ -15,11 +15,14 @@
     "db:generate": "npm run db:generate -w @marketplace/database",
     "db:migrate": "npm run db:migrate -w @marketplace/database",
     "db:validate": "npm run db:validate -w @marketplace/database",
-    "db:seed": "npm run db:seed -w @marketplace/database"
+    "db:seed": "npm run db:seed -w @marketplace/database",
+    "test": "vitest run --config vitest.config.mts",
+    "test:integration": "vitest run --config vitest.integration.config.mts"
   },
   "devDependencies": {
     "turbo": "2.11.10",
-    "typescript": "5.7.2"
+    "typescript": "5.7.2",
+    "vitest": "5.1.0"
   },
   "engines": {
     "node": ">=20"

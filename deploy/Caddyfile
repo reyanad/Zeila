@@ -1,0 +1,10 @@
+{$DOMAIN}, www.{$DOMAIN} {
+	encode zstd gzip
+	@www host www.{$DOMAIN}
+	redir @www https://{$DOMAIN}{uri} permanent
+	reverse_proxy web:3000
+}
+
+rt.{$DOMAIN} {
+	reverse_proxy realtime:4001
+}

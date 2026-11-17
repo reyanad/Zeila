@@ -1,0 +1,147 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "phase-*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  NEXT_TELEMETRY_DISABLED: "1"
+  TURBO_TELEMETRY_DISABLED: "1"
+  # Test-only secrets; production values live in the deployment environment.
+  AUTH_SECRET: ci-only-secret-ci-only-secret-ci-only-secret-0123
+  DATA_ENCRYPTION_KEY: Y2ktb25seS1kYXRhLWtleS1jaS1vbmx5LWRhdGEta2V5MDE=
+  DATABASE_URL: postgresql://marketplace:marketplace@localhost:5432/marketplace?schema=public
+
+jobs:
+  checks:
+    name: Types, lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:validate
+      - run: npx turbo run typecheck lint
+      - run: npm test
+      - name: Bundle the mobile app (Android)
+        working-directory: apps/mobile
+        env:
+          EXPO_OFFLINE: "1"
+          EXPO_NO_TELEMETRY: "1"
+          EXPO_PUBLIC_API_URL: https://example.invalid
+        run: npx expo export --platform android --output-dir /tmp/expo-export --no-bytecode
+
+  integration:
+    name: Database integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: marketplace
+          POSTGRES_PASSWORD: marketplace
+          POSTGRES_DB: marketplace
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U marketplace" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Create the schema from the migrations
+        working-directory: packages/database
+        run: |
+          if [ -d prisma/migrations ]; then
+            npx prisma migrate deploy
+          else
+            echo "::warning::No migrations committed yet; creating the schema with db push."
+            npx prisma db push
+          fi
+      - name: Migrations must match the schema
+        working-directory: packages/database
+        run: npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --exit-code
+      - name: Initial migration SQL (for review)
+        working-directory: packages/database
+        run: npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script --output /tmp/init-migration.sql
+      - name: Show the initial migration when none is committed yet
+        working-directory: packages/database
+        run: |
+          if [ ! -d prisma/migrations ]; then
+            echo "----- BEGIN INIT MIGRATION -----"
+            cat /tmp/init-migration.sql
+            echo "----- END INIT MIGRATION -----"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: init-migration
+          path: /tmp/init-migration.sql
+      - run: npm run test:integration
+
+  e2e:
+    name: Build and end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: checks
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: marketplace
+          POSTGRES_PASSWORD: marketplace
+          POSTGRES_DB: marketplace
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U marketplace" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      REDIS_URL: redis://localhost:6379
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      AUTH_URL: http://localhost:3000
+      E2E_PORT: "3000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - name: Schema and seed data
+        working-directory: packages/database
+        run: |
+          if [ -d prisma/migrations ]; then npx prisma migrate deploy; else npx prisma db push; fi
+          npx prisma db seed
+      - run: npx turbo run build --filter=@marketplace/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run e2e -w @marketplace/web
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7

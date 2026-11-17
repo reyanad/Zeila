@@ -118,7 +118,19 @@ split orders, Stripe Connect escrow, double-entry ledger.
       everywhere and suspension end it); the token lives in the device keychain/keystore.
       Push notifications through Expo for every notification and new chat messages, with
       stale tokens removed; tapping a push opens the matching screen.
-- [ ] Phase 12 — Tests, hardening, CI/CD
+- [x] **Phase 12 — Tests, hardening, CI/CD**: Vitest unit suite (pricing, promos, shipping,
+      tax, ledger balancing, refund splits, settlement, sub-order statuses, flash pricing,
+      affiliate commission, licence keys, chat screening, money parsing and FX, realtime
+      tickets, chart geometry, field/object/stream encryption and signed tickets, CSP);
+      PostgreSQL integration suite covering checkout → payment → escrow → shipping → return →
+      release, service delivery → dispute → settlement → referral, approvals, chat screening and
+      flash-sale caps, asserting after each step that the ledger balances and matches the order
+      records; Playwright smoke tests (desktop and mobile) for pages, redirects, headers and
+      APIs; nonce-based Content Security Policy on every page plus HSTS, frame, referrer and
+      permissions headers; GitHub Actions CI (types, lint, unit tests, Android bundle,
+      integration tests on Postgres + pgvector with a migration drift check, production build,
+      E2E); Docker images for web, worker and realtime published to GHCR after green CI;
+      production Docker Compose with Caddy (automatic HTTPS).
 
 ## Local setup (after Phase 1)
 
@@ -127,7 +139,7 @@ cp .env.example .env          # fill values; defaults work for docker dev
 docker compose up -d          # postgres (pgvector), redis, meilisearch
 npm install
 npm run db:generate           # prisma client
-npm run db:migrate            # first migration (named: init)
+npm run db:migrate            # applies the migrations (and creates new ones after schema changes)
 npm run dev                   # turbo dev (web on :3000)
 ```
 
@@ -261,6 +273,30 @@ work on real devices with a project id. The API lives under `/api/mobile/*` on t
 (bearer tokens, JSON); checkout, returns, reviews and disputes open the web pages in an
 in-app browser so payments stay on the PCI-compliant Stripe flow.
 
+## Tests (Phase 12)
+
+```bash
+npm test                     # unit tests (no database needed)
+docker compose up -d postgres
+npm run db:deploy -w @marketplace/database   # or db:migrate in development
+npm run test:integration     # money flows against PostgreSQL
+npm run build -w @marketplace/web && npm run e2e -w @marketplace/web   # Playwright
+```
+
+## Deploying (when the domain is ready)
+
+1. A server with Docker (2 vCPU / 4 GB RAM is enough to start), DNS `A` records for the domain,
+   `www` and `rt` (realtime) pointing at it.
+2. In GitHub: Settings → Variables → `PUBLIC_APP_URL=https://<domain>` and
+   `PUBLIC_REALTIME_URL=https://rt.<domain>`; the next green CI run on `main` publishes images to
+   `ghcr.io/<owner>/zeila-{web,worker,realtime}` (make the packages public or `docker login ghcr.io`
+   on the server).
+3. On the server: copy `deploy/`, fill in `deploy/.env.production` from the example, then
+   `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d`.
+   Migrations run first; Caddy obtains HTTPS certificates.
+4. Stripe dashboard: webhooks to `https://<domain>/api/webhooks/stripe` (platform events) and
+   `/api/webhooks/stripe-connect` (connected accounts); put the signing secrets in the env file.
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -282,8 +318,10 @@ CREATE INDEX listing_embedding_hnsw ON "Listing" USING hnsw ("embedding" vector_
 Each phase is verified with `prisma validate`, `tsc --noEmit` in every workspace and
 `next build`. Phase 3 also ran runtime checks of the listing schemas and an encrypted
 stream round-trip (5 MB upload → vault → ranged decrypt; tampering rejected). The build
-environment cannot download Prisma's native engines, so nothing has yet run against a
-live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + pgvector.
+environment cannot download Prisma's native engines, so database work is verified in GitHub
+Actions: the initial migration (`prisma/migrations/20261117000000_init`) was generated there by
+Prisma's own engine, and CI applies it to PostgreSQL + pgvector, checks it matches the schema
+exactly, and runs the integration and end-to-end suites against it.
 Phase 4 also module-loaded the worker under `tsx` (which caught an ESM/CommonJS export
 bug that type checking missed) and checked document building and currency conversion.
 Phase 5 ran 16 unit checks of the pricing engine (rounding, promo allocation, weight-based
@@ -301,7 +339,13 @@ commission maths (share of fee, pro-rata refunds, cancelled sub-orders), flash p
 and over the cap, uncapped, none), and the chart geometry (clean ticks, compact axis labels,
 24px column cap with air and a 2px gap, baseline-anchored columns), and rendered the sales
 chart to an image to check labels and layout. Phase 11 type-checked the app and bundled it
-for Android with Metro (1,314 modules, including the shared workspace package).
+for Android with Metro (1,314 modules, including the shared workspace package). Phase 12 runs
+63 unit tests locally; it also started the production build and checked that every script on
+the sign-in and registration pages carries the CSP nonce, that the security headers are set,
+that private pages redirect to sign-in and that the mobile and licence APIs validate input.
+In GitHub Actions the integration suite (checkout, payment, escrow, shipping, partial return,
+release, service delivery, dispute settlement, referral approval, chat screening, flash-sale caps,
+with the ledger balanced and reconciled after every step) and all 18 end-to-end checks pass.
 
 ## Needs owner input
 
