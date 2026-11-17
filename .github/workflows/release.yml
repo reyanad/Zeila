@@ -1,0 +1,70 @@
+name: Release images
+
+# Builds the web, worker and realtime images and publishes them to GitHub
+# Container Registry after CI passes on main (or for version tags).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            dockerfile: docker/web.Dockerfile
+            args: ""
+          - name: worker
+            dockerfile: docker/node-service.Dockerfile
+            args: |
+              APP=@marketplace/worker
+              ENTRY=apps/worker/src/index.ts
+          - name: realtime
+            dockerfile: docker/node-service.Dockerfile
+            args: |
+              APP=@marketplace/realtime-server
+              ENTRY=apps/realtime/src/index.ts
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/zeila-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name != 'push' }}
+            type=sha
+            type=ref,event=tag
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ matrix.args }}
+            NEXT_PUBLIC_APP_URL=${{ vars.PUBLIC_APP_URL || 'http://localhost:3000' }}
+            NEXT_PUBLIC_REALTIME_URL=${{ vars.PUBLIC_REALTIME_URL }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
