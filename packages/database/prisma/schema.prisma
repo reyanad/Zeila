@@ -351,6 +351,8 @@ model User {
   disputesOpened     Dispute[]                 @relation("DisputeOpener")
   disputesResolved   Dispute[]                 @relation("DisputeResolver")
   disputeMessages    DisputeMessage[]
+  mobileSessions     MobileSession[]
+  pushTokens         PushToken[]
   conversations      ConversationParticipant[]
   messages           Message[]
   reviewsWritten     Review[]                  @relation("ReviewAuthor")
@@ -1488,4 +1490,36 @@ model ListingViewDaily {
 
   @@id([listingId, day])
   @@index([day])
+}
+
+/// Bearer sessions for the mobile app. Only a SHA-256 of the token is stored;
+/// bumping User.sessionVersion (password change, suspension) invalidates them.
+model MobileSession {
+  id             String    @id @default(cuid())
+  userId         String
+  tokenHash      String    @unique
+  sessionVersion Int
+  deviceName     String?
+  createdAt      DateTime  @default(now())
+  lastUsedAt     DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Expo push tokens registered by the mobile app.
+model PushToken {
+  id         String   @id @default(cuid())
+  userId     String
+  token      String   @unique
+  platform   String // ios | android
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
