@@ -31,6 +31,8 @@ export const accounts = {
   promotions: (currency: string): AccountRef => ({ code: `platform:promotions:${currency}`, name: `Platform promotions (${currency})`, type: "EXPENSE", currency }),
   refunds: (currency: string): AccountRef => ({ code: `platform:refunds:${currency}`, name: `Refunds absorbed (${currency})`, type: "EXPENSE", currency }),
   chargebacks: (currency: string): AccountRef => ({ code: `platform:chargebacks:${currency}`, name: `Chargeback losses to recover (${currency})`, type: "EXPENSE", currency }),
+  affiliateExpense: (currency: string): AccountRef => ({ code: `platform:affiliates:${currency}`, name: `Affiliate commissions (${currency})`, type: "EXPENSE", currency }),
+  affiliatePayable: (affiliateId: string, currency: string): AccountRef => ({ code: `affiliate:${affiliateId}:payable:${currency}`, name: `Payable to affiliate ${affiliateId} (${currency})`, type: "LIABILITY", currency }),
   escrow: (storeId: string, currency: string): AccountRef => ({ code: `store:${storeId}:escrow:${currency}`, name: `Escrow for store ${storeId} (${currency})`, type: "LIABILITY", currency, storeId }),
   payable: (storeId: string, currency: string): AccountRef => ({ code: `store:${storeId}:payable:${currency}`, name: `Payable to store ${storeId} (${currency})`, type: "LIABILITY", currency, storeId }),
 };
