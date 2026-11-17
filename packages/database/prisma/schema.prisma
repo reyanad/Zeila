@@ -279,6 +279,13 @@ enum FraudFlagStatus {
   DISMISSED
 }
 
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
 // ============================================================================
 // USERS, AUTH, KYC
 // ============================================================================
@@ -295,7 +302,10 @@ model User {
   country        String? // ISO-3166 alpha-2
   defaultCurrency String   @default("USD")
   twoFactorEnabled Boolean @default(false)
-  twoFactorSecret  String?
+  twoFactorSecret  String? // AES-256-GCM ciphertext of the base32 TOTP secret
+  // Bumped on password change/reset and "sign out everywhere"; JWT sessions
+  // carrying an older value are rejected.
+  sessionVersion Int       @default(0)
   isSuspended    Boolean   @default(false)
   suspendedReason String?
   lastLoginAt    DateTime?
@@ -304,6 +314,7 @@ model User {
 
   accounts            OauthAccount[]
   sessions            Session[]
+  recoveryCodes       TwoFactorRecoveryCode[]
   kycSubmissions      KycSubmission[]
   kycReviews          KycSubmission[]       @relation("KycReviewer")
   store               Store?
@@ -363,12 +374,29 @@ model Session {
   @@index([userId])
 }
 
+// Single-use tokens for e-mail verification and password reset. `token` holds
+// the SHA-256 hash of the value mailed to the user, never the raw value.
+// identifier: "verify-email:<userId>" | "password-reset:<userId>"
 model VerificationToken {
   identifier String
   token      String   @unique
   expires    DateTime
 
   @@unique([identifier, token])
+  @@index([identifier])
+}
+
+// One-time backup codes for TOTP two-factor auth (SHA-256 hashed).
+model TwoFactorRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model KycSubmission {
@@ -379,8 +407,8 @@ model KycSubmission {
   birthDate   DateTime?
   country     String
   idType      String // passport | national_id | driver_license
-  idNumber    String
-  documents   Json // [{kind, storageKey, fileName}]
+  idNumber    String // AES-256-GCM ciphertext; decrypt only for KYC reviewers
+  documents   Json // [{kind, storageKey, fileName, contentType, size}] (objects are encrypted in the vault bucket)
   notes       String?
   reviewedById String?
   reviewedAt  DateTime?
@@ -1300,4 +1328,25 @@ model PlatformSetting {
   key       String   @id // e.g. "platform_fee_bps", "payout_hold_days"
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+// Idempotent inbox for external webhook deliveries (Stripe platform + Connect).
+// A delivery is inserted once per (provider, eventId); retries of an already
+// PROCESSED/IGNORED event are acknowledged without re-running handlers.
+model WebhookEvent {
+  id          String             @id @default(cuid())
+  provider    String // "stripe" | "stripe-connect"
+  eventId     String // provider's event id, e.g. evt_...
+  type        String // e.g. "account.updated"
+  accountId   String? // connected account the event belongs to, if any
+  status      WebhookEventStatus @default(RECEIVED)
+  attempts    Int                @default(0)
+  payload     Json
+  error       String?
+  receivedAt  DateTime           @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, eventId])
+  @@index([status, receivedAt])
+  @@index([type])
 }

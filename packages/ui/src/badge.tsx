@@ -1,28 +1,33 @@
 import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "./cn";
 
-export type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
+const badgeVariants = cva(
+  "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap",
+  {
+    variants: {
+      tone: {
+        neutral: "border-border bg-muted text-muted-foreground",
+        success: "border-success/30 bg-success/10 text-success",
+        warning: "border-warning/40 bg-warning/15 text-warning-foreground",
+        danger: "border-destructive/30 bg-destructive/10 text-destructive",
+        info: "border-primary/30 bg-primary/10 text-primary",
+      },
+    },
+    defaultVariants: { tone: "neutral" },
+  },
+);
+
+export type BadgeTone = NonNullable<VariantProps<typeof badgeVariants>["tone"]>;
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   tone?: BadgeTone;
 }
 
-const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: "mp-badge--neutral",
-  success: "mp-badge--success",
-  warning: "mp-badge--warning",
-  danger: "mp-badge--danger",
-  info: "mp-badge--info",
-};
-
-/**
- * Minimal status badge used across order/escrow/dispute states.
- * Styling hooks are plain class names until the Tailwind design system
- * arrives in Phase 3; the component API stays stable.
- */
+/** Status badge used across order/escrow/dispute/onboarding states. */
 export function Badge({ tone = "neutral", className, children, ...rest }: BadgeProps): React.JSX.Element {
   return (
-    <span className={cn("mp-badge", TONE_CLASSES[tone], className)} {...rest}>
+    <span className={cn(badgeVariants({ tone }), className)} {...rest}>
       {children}
     </span>
   );

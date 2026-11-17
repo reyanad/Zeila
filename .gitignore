@@ -26,3 +26,9 @@ coverage/
 
 # local data
 docker-volumes/
+
+# typescript incremental build info
+*.tsbuildinfo
+
+# local dev uploads (filesystem storage driver)
+.data/
