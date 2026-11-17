@@ -197,3 +197,15 @@ export const warehouseSchema = z.object({
   country: countryCodeSchema,
 });
 export type WarehouseInput = z.infer<typeof warehouseSchema>;
+
+// ---------------------------------------------------------------------------
+// Exchange rates (platform setting written by the worker)
+// ---------------------------------------------------------------------------
+
+export const FX_RATES_SETTING_KEY = "fx_rates";
+
+export const fxRatesSchema = z.object({
+  base: z.literal("USD"),
+  rates: z.partialRecord(currencyCodeSchema, z.number().positive()),
+  fetchedAt: z.iso.datetime(),
+});
