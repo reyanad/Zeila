@@ -90,7 +90,7 @@ async function main(): Promise<void> {
 
   const notificationWorker = new Worker<NotificationJob, string>(
     QUEUE_NAMES.notifications,
-    notificationProcessor({ resendApiKey: env.RESEND_API_KEY, emailFrom: env.EMAIL_FROM, appUrl: env.NEXT_PUBLIC_APP_URL, brand: env.APP_NAME }),
+    notificationProcessor({ expoAccessToken: env.EXPO_ACCESS_TOKEN, resendApiKey: env.RESEND_API_KEY, emailFrom: env.EMAIL_FROM, appUrl: env.NEXT_PUBLIC_APP_URL, brand: env.APP_NAME }),
     { connection, concurrency: Math.min(env.WORKER_CONCURRENCY, 4) },
   );
   if (!env.RESEND_API_KEY) console.warn("[worker] RESEND_API_KEY not set: notification e-mails are logged, not sent");

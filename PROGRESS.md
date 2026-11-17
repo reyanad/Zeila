@@ -108,7 +108,16 @@ split orders, Stripe Connect escrow, double-entry ledger.
       against order records, platform accounts, affiliate payouts recorded to the ledger,
       chargeback losses to recover, latest journal entries); platform settings (fee, protection
       window, listing review mode, tax table validated against its schema); audit log viewer.
-- [ ] Phase 11 — Expo mobile app
+- [x] **Phase 11 — Mobile app** (`apps/mobile`, Expo SDK 58 + Expo Router, iOS and Android):
+      browse and search with type filters and live flash prices, listing detail with photos,
+      "Buy securely" (escrow checkout in an in-app browser) and "Message the seller"; orders
+      with per-store status, tracking links, service workspaces and "I received it" (releases
+      escrow after a confirmation); messages with screened chat, custom offer cards and
+      polling while open; alerts; account. Sign-in with e-mail, password and two-factor code
+      issues a 60-day bearer session (only its SHA-256 is stored; password change, sign-out
+      everywhere and suspension end it); the token lives in the device keychain/keystore.
+      Push notifications through Expo for every notification and new chat messages, with
+      stale tokens removed; tapping a push opens the matching screen.
 - [ ] Phase 12 — Tests, hardening, CI/CD
 
 ## Local setup (after Phase 1)
@@ -238,6 +247,20 @@ these in the ledger view).
   admin command center (Phase 10).
 - Listing views are counted once per browser session (bots skipped) into `ListingViewDaily`.
 
+## Mobile app (Phase 11)
+
+```bash
+cd apps/mobile
+echo "EXPO_PUBLIC_API_URL=http://<your-computer-LAN-IP>:3000" > .env   # Android emulator: http://10.0.2.2:3000
+npx expo start            # scan the QR code with Expo Go, or press a / i for an emulator
+```
+
+Store builds use EAS: `npx eas init` (sets the project id; put it in
+`EXPO_PUBLIC_EAS_PROJECT_ID`), then `npx eas build --platform all`. Push notifications only
+work on real devices with a project id. The API lives under `/api/mobile/*` on the web app
+(bearer tokens, JSON); checkout, returns, reviews and disputes open the web pages in an
+in-app browser so payments stay on the PCI-compliant Stripe flow.
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -277,7 +300,8 @@ worker, and the gateway (health check; a forged ticket is refused). Phase 9 chec
 commission maths (share of fee, pro-rata refunds, cancelled sub-orders), flash pricing (within
 and over the cap, uncapped, none), and the chart geometry (clean ticks, compact axis labels,
 24px column cap with air and a 2px gap, baseline-anchored columns), and rendered the sales
-chart to an image to check labels and layout.
+chart to an image to check labels and layout. Phase 11 type-checked the app and bundled it
+for Android with Metro (1,314 modules, including the shared workspace package).
 
 ## Needs owner input
 

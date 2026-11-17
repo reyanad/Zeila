@@ -73,7 +73,14 @@ async function broadcast(conversationId: string, recipients: string[], everyone:
     message: { id: message.id, conversationId, senderId: message.senderId, kind: message.kind, body: message.body, flagged: message.flaggedCircumvention, createdAt: message.createdAt.toISOString() },
   });
   const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) await Promise.all(recipients.map((recipientId) => enqueueNotificationJob(redisUrl, { kind: "message-email", conversationId, recipientId })));
+  if (redisUrl) {
+    await Promise.all(
+      recipients.flatMap((recipientId) => [
+        enqueueNotificationJob(redisUrl, { kind: "message-push", messageId: message.id, recipientId }),
+        enqueueNotificationJob(redisUrl, { kind: "message-email", conversationId, recipientId }),
+      ]),
+    );
+  }
 }
 
 export async function postMessage(senderId: string, conversationId: string, body: string, now: Date): Promise<PostedMessage> {
