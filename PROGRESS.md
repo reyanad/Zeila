@@ -318,8 +318,10 @@ CREATE INDEX listing_embedding_hnsw ON "Listing" USING hnsw ("embedding" vector_
 Each phase is verified with `prisma validate`, `tsc --noEmit` in every workspace and
 `next build`. Phase 3 also ran runtime checks of the listing schemas and an encrypted
 stream round-trip (5 MB upload → vault → ranged decrypt; tampering rejected). The build
-environment cannot download Prisma's native engines, so nothing has yet run against a
-live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + pgvector.
+environment cannot download Prisma's native engines, so database work is verified in GitHub
+Actions: the initial migration (`prisma/migrations/20261117000000_init`) was generated there by
+Prisma's own engine, and CI applies it to PostgreSQL + pgvector, checks it matches the schema
+exactly, and runs the integration and end-to-end suites against it.
 Phase 4 also module-loaded the worker under `tsx` (which caught an ESM/CommonJS export
 bug that type checking missed) and checked document building and currency conversion.
 Phase 5 ran 16 unit checks of the pricing engine (rounding, promo allocation, weight-based
@@ -341,7 +343,9 @@ for Android with Metro (1,314 modules, including the shared workspace package). 
 63 unit tests locally; it also started the production build and checked that every script on
 the sign-in and registration pages carries the CSP nonce, that the security headers are set,
 that private pages redirect to sign-in and that the mobile and licence APIs validate input.
-The integration and end-to-end suites run in GitHub Actions against PostgreSQL + pgvector.
+In GitHub Actions the integration suite (checkout, payment, escrow, shipping, partial return,
+release, service delivery, dispute settlement, referral approval, chat screening, flash-sale caps,
+with the ledger balanced and reconciled after every step) and all 18 end-to-end checks pass.
 
 ## Needs owner input
 
