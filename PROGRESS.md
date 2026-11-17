@@ -84,7 +84,18 @@ split orders, Stripe Connect escrow, double-entry ledger.
       offers a refund the buyer can accept, either side can escalate, deadlines auto-escalate
       or close; staff queue and decisions in `/admin/disputes`; Stripe chargebacks recorded as
       card disputes with evidence submission, and the bank's decision applied to the ledger.
-- [ ] Phase 9 — Flash sales, affiliates, verified reviews, seller analytics
+- [x] **Phase 9 — Growth**: flash sales (`/seller/studio/promotions`): a percentage off chosen
+      listings for a time window, optionally capped per listing; sale units are claimed with a
+      conditional UPDATE when the order is placed and returned if it is never paid; sale prices
+      show on cards, the listing page (banner with live countdown), the cart and `/deals`;
+      seller coupon codes (percent or amount, minimum order, total and per-buyer limits,
+      schedule, on/off); affiliate program (`/affiliates`): `?ref=CODE` links on any page,
+      30-day last-click attribution, commission = a share of the platform's fee net of refunds,
+      approved by the worker once the order is settled and booked to the ledger; verified
+      reviews (buyers of delivered items only, editable for 30 days, contact details screened),
+      rating breakdown on listings, seller replies (`/seller/studio/reviews`); seller analytics
+      (`/seller/studio/analytics`): sales, orders, average order, conversion, refunds, rating,
+      escrow and payout balances, daily sales and views charts with a table view, top listings.
 - [ ] Phase 10 — Super-admin command center
 - [ ] Phase 11 — Expo mobile app
 - [ ] Phase 12 — Tests, hardening, CI/CD
@@ -205,6 +216,17 @@ the rest immediately. A lost chargeback takes the buyer's money back out of escr
 seller was already paid, it is booked to `platform:chargebacks` for recovery (Phase 10 shows
 these in the ledger view).
 
+## Growth features (Phase 9)
+
+- Flash sale prices stack on wholesale tiers (the sale percentage applies to the tier price).
+  A line above the sale's remaining capped quantity is charged the normal price.
+- Affiliates earn `Affiliate.commissionBps` (default 20%) of the platform commission on
+  orders placed within 30 days of their link being clicked (last click wins; self-referrals
+  ignored). The worker's escrow job approves commissions once every sub-order is settled and
+  posts `platform:affiliates` → `affiliate:<id>:payable`. Paying affiliates is done from the
+  admin command center (Phase 10).
+- Listing views are counted once per browser session (bots skipped) into `ListingViewDaily`.
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -240,7 +262,11 @@ balance and never exceed escrow) and 12 sub-order status transitions. Phase 8 ch
 chat screening (8 cases: Ethiopian and international phone numbers, obfuscated e-mails,
 Telegram links, Amharic payment terms; order numbers, dates and prices untouched), realtime
 tickets (valid, wrong secret, expired, forged), e-mail HTML escaping, module loading of the
-worker, and the gateway (health check; a forged ticket is refused).
+worker, and the gateway (health check; a forged ticket is refused). Phase 9 checked affiliate
+commission maths (share of fee, pro-rata refunds, cancelled sub-orders), flash pricing (within
+and over the cap, uncapped, none), and the chart geometry (clean ticks, compact axis labels,
+24px column cap with air and a 2px gap, baseline-anchored columns), and rendered the sales
+chart to an image to check labels and layout.
 
 ## Needs owner input
 
