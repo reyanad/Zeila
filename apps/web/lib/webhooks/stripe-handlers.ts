@@ -1,7 +1,8 @@
 import "server-only";
 import type Stripe from "stripe";
 import { prisma } from "@marketplace/database";
-import { completeOrderPayment } from "@marketplace/core";
+import { completeOrderPayment, freezeOrderEscrows, unfreezeOrderEscrows } from "@marketplace/core";
+import { recordAudit } from "@/lib/audit";
 import { markAccountDisconnected, syncStripeAccount } from "@/lib/seller/stripe-account";
 
 /**
@@ -83,7 +84,82 @@ async function onPaymentIntentProcessing(event: Stripe.Event): Promise<void> {
   });
 }
 
+async function orderIdForCharge(chargeId: string): Promise<string | null> {
+  const payment = await prisma.payment.findFirst({ where: { stripeChargeId: chargeId }, select: { orderId: true } });
+  return payment?.orderId ?? null;
+}
+
+/** A chargeback freezes the order's escrow so no money leaves before it is resolved. */
+async function onChargeDisputeCreated(event: Stripe.Event): Promise<void> {
+  if (event.type !== "charge.dispute.created") return;
+  const dispute = event.data.object;
+  const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
+  const orderId = await orderIdForCharge(chargeId);
+  if (!orderId) return;
+  const frozen = await freezeOrderEscrows(orderId, `Chargeback ${dispute.id}: ${dispute.reason}`, new Date(event.created * 1000));
+  await recordAudit({ actorId: null, action: "chargeback.opened", entity: "Order", entityId: orderId, data: { disputeId: dispute.id, reason: dispute.reason, amount: dispute.amount, frozen } });
+}
+
+/** A won chargeback unfreezes escrow; a lost one stays frozen for the resolution center. */
+async function onChargeDisputeClosed(event: Stripe.Event): Promise<void> {
+  if (event.type !== "charge.dispute.closed") return;
+  const dispute = event.data.object;
+  const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
+  const orderId = await orderIdForCharge(chargeId);
+  if (!orderId) return;
+  if (dispute.status === "won") await unfreezeOrderEscrows(orderId);
+  await recordAudit({ actorId: null, action: `chargeback.${dispute.status}`, entity: "Order", entityId: orderId, data: { disputeId: dispute.id, amount: dispute.amount } });
+}
+
+/** Record refunds (including any made from the Stripe dashboard) against the payment. */
+async function onChargeRefunded(event: Stripe.Event, stripe: Stripe): Promise<void> {
+  if (event.type !== "charge.refunded") return;
+  const charge = event.data.object;
+  const intentId = typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id;
+  if (!intentId) return;
+  const payment = await prisma.payment.findUnique({ where: { stripePaymentIntentId: intentId }, select: { id: true, amount: true } });
+  if (!payment) return;
+  const refunds = await stripe.refunds.list({ charge: charge.id, limit: 100 });
+  for (const refund of refunds.data) {
+    if (refund.status === "failed" || refund.status === "canceled") continue;
+    await prisma.refund.upsert({
+      where: { stripeRefundId: refund.id },
+      create: { paymentId: payment.id, stripeRefundId: refund.id, amount: refund.amount, reason: refund.reason ?? (refund.metadata?.reason ?? null) },
+      update: { amount: refund.amount },
+    });
+  }
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: { status: charge.amount_refunded >= payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+  });
+}
+
+/** Sellers' bank payouts from their connected accounts, for the seller dashboard. */
+async function onPayout(event: Stripe.Event): Promise<void> {
+  if (!event.type.startsWith("payout.") || !event.account) return;
+  const payout = event.data.object as Stripe.Payout;
+  const store = await prisma.store.findUnique({ where: { stripeAccountId: event.account }, select: { id: true } });
+  if (!store) return;
+  const status = payout.status === "paid" ? "PAID" : payout.status === "failed" ? "FAILED" : payout.status === "canceled" ? "CANCELLED" : payout.status === "in_transit" ? "IN_TRANSIT" : "PENDING";
+  const data = {
+    amount: payout.amount,
+    currency: payout.currency.toUpperCase(),
+    status,
+    arrivalAt: new Date(payout.arrival_date * 1000),
+    failureReason: payout.failure_message ?? null,
+  } as const;
+  await prisma.payout.upsert({ where: { stripePayoutId: payout.id }, create: { ...data, storeId: store.id, stripePayoutId: payout.id }, update: data });
+}
+
 export const stripeEventHandlers: Readonly<Record<string, StripeEventHandler>> = {
+  "charge.dispute.created": onChargeDisputeCreated,
+  "charge.dispute.closed": onChargeDisputeClosed,
+  "charge.refunded": onChargeRefunded,
+  "payout.created": onPayout,
+  "payout.updated": onPayout,
+  "payout.paid": onPayout,
+  "payout.failed": onPayout,
+  "payout.canceled": onPayout,
   "payment_intent.succeeded": onPaymentIntentSucceeded,
   "payment_intent.payment_failed": onPaymentIntentFailed,
   "payment_intent.processing": onPaymentIntentProcessing,
