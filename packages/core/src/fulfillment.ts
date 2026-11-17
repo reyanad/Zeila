@@ -91,6 +91,9 @@ export async function fulfillPaidOrder(tx: Prisma.TransactionClient, orderId: st
             select: {
               id: true,
               listingType: true,
+              lineTotal: true,
+              titleSnapshot: true,
+              variantSnapshot: true,
               listing: { select: { digitalAsset: { select: { id: true, licenseTemplate: true, activationsLimit: true } } } },
             },
           },
@@ -118,6 +121,21 @@ export async function fulfillPaidOrder(tx: Prisma.TransactionClient, orderId: st
 
     let allDelivered = subOrder.items.length > 0;
     for (const item of subOrder.items) {
+      if (item.listingType === "SERVICE") {
+        const snapshot = (item.variantSnapshot ?? {}) as Record<string, unknown>;
+        const days = typeof snapshot.deliveryDays === "number" ? snapshot.deliveryDays : 7;
+        const discount = typeof snapshot.discount === "number" ? snapshot.discount : 0;
+        await tx.milestone.create({
+          data: {
+            orderItemId: item.id,
+            position: 1,
+            title: typeof snapshot.label === "string" ? snapshot.label : item.titleSnapshot,
+            amount: Math.max(0, item.lineTotal - discount),
+            dueAt: new Date(paidAt.getTime() + days * 86_400_000),
+            status: "FUNDED",
+          },
+        });
+      }
       const asset = item.listing.digitalAsset;
       if (item.listingType !== "DIGITAL" || !asset) {
         allDelivered = false;
