@@ -887,6 +887,7 @@ model SubOrder {
   discountTotal     Int            @default(0)
   grandTotal        Int
   platformFee       Int            @default(0) // commission kept by platform
+  refundedTotal     Int            @default(0) // refunded to the buyer from this sub-order
   shippingAddressId String?
   shippedAt         DateTime?
   deliveredAt       DateTime?
@@ -1069,6 +1070,8 @@ model RmaRequest {
   requesterId          String
   reason               String
   details              String?
+  quantity             Int            @default(1)
+  sellerNote           String?
   photos               Json           @default("[]")
   status               RmaStatus      @default(REQUESTED)
   resolution           RmaResolution?
