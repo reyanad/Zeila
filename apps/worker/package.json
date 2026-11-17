@@ -1,0 +1,27 @@
+{
+  "name": "@marketplace/worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "reindex": "tsx src/reindex.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@marketplace/database": "*",
+    "@marketplace/jobs": "*",
+    "@marketplace/search": "*",
+    "@marketplace/shared-types": "*",
+    "bullmq": "6.5.4",
+    "dotenv": "16.4.7",
+    "ioredis": "5.11.1",
+    "meilisearch": "0.62.0",
+    "tsx": "4.23.15",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2"
+  }
+}

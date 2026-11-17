@@ -31,7 +31,14 @@ split orders, Stripe Connect escrow, double-entry ledger.
   Services: Basic/Standard/Premium packages and a buyer intake-form builder. Photos are
   re-encoded to WebP (EXIF/GPS stripped). Warehouses page, category seed, publish rules
   (store must be active; pre/post moderation via `listing_review_mode` setting).
-- [ ] Phase 4 — Meilisearch sync workers, pgvector recommendations, SSR storefront
+- [x] **Phase 4 — Storefront & search**: `packages/search` (Meilisearch documents, index
+  settings, full and incremental sync, database-search fallback), `packages/jobs` (BullMQ
+  queues), `apps/worker` (search sync, OpenAI-compatible embeddings into pgvector, daily FX
+  rates). Server-rendered storefront: home, `/search` (filters, sorting, price in the
+  visitor's currency), `/c/[slug]` categories, `/listing/[slug]` with gallery, variant
+  picker (stock, compare-at, wholesale tiers), service package tabs and digital file
+  details, `/store/[slug]`, similar listings (pgvector cosine, category fallback),
+  currency switcher with approximate conversions, JSON-LD, sitemap and robots.
 - [ ] Phase 5 — Unified multi-type cart, tax/shipping engine, promo codes, Stripe split checkout
 - [ ] Phase 6 — Idempotent webhooks, ledger engine, digital fulfillment, BullMQ escrow cron
 - [ ] Phase 7 — Fulfillment: carrier tracking/RMA, encrypted vault + license API, milestone workspace
@@ -86,6 +93,22 @@ Subscribe the Connect endpoint to `account.updated`, `capability.updated` and
 
 After the first migration, load the starter categories: `npm run db:seed`.
 
+## Running the worker (Phase 4)
+
+```bash
+npm run dev -w @marketplace/worker        # search sync, embeddings, daily FX rates
+npm run reindex -w @marketplace/worker    # one-off full rebuild of the search index
+```
+
+Without `MEILI_HOST` the storefront searches PostgreSQL directly; without embeddings
+settings, "similar listings" uses the same category. Once the catalogue grows past a few
+thousand listings, add an approximate-nearest-neighbour index in a custom migration
+(`npx prisma migrate dev --create-only`, then add):
+
+```sql
+CREATE INDEX listing_embedding_hnsw ON "Listing" USING hnsw ("embedding" vector_cosine_ops);
+```
+
 ## Verification status
 
 Each phase is verified with `prisma validate`, `tsc --noEmit` in every workspace and
@@ -93,6 +116,8 @@ Each phase is verified with `prisma validate`, `tsc --noEmit` in every workspace
 stream round-trip (5 MB upload → vault → ranged decrypt; tampering rejected). The build
 environment cannot download Prisma's native engines, so nothing has yet run against a
 live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + pgvector.
+Phase 4 also module-loaded the worker under `tsx` (which caught an ESM/CommonJS export
+bug that type checking missed) and checked document building and currency conversion.
 
 ## Needs owner input
 

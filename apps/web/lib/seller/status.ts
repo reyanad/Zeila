@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma, type StoreStatus } from "@marketplace/database";
+import { scheduleSearchSync } from "@/lib/search-sync";
 
 /**
  * Recompute a store's status from its prerequisites:
@@ -32,6 +33,8 @@ export async function syncStoreStatus(storeId: string): Promise<StoreStatus | nu
 
   if (next !== store.status) {
     await prisma.store.update({ where: { id: store.id }, data: { status: next } });
+    // Listings appear in (or vanish from) search with the store.
+    scheduleSearchSync({ kind: "store", storeId: store.id });
   }
   return next;
 }

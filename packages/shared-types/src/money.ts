@@ -53,3 +53,27 @@ export function minorToInput(amount: MinorUnits): string {
   const fraction = Math.abs(amount % 100);
   return fraction === 0 ? String(whole) : `${whole}.${String(fraction).padStart(2, "0")}`;
 }
+
+/**
+ * Exchange rates as units of each currency per 1 USD, e.g. { USD: 1, ETB: 155.4 }.
+ * Fetched by the worker and stored as a platform setting; never hard-coded.
+ */
+export interface FxRates {
+  base: "USD";
+  rates: Partial<Record<CurrencyCode, number>>;
+  fetchedAt: string;
+}
+
+/** Convert minor units between currencies; null when either rate is unknown. */
+export function convertMinor(amount: MinorUnits, from: string, to: string, fx: FxRates | null): MinorUnits | null {
+  if (from === to) return amount;
+  if (!fx) return null;
+  const fromRate = fx.rates[from as CurrencyCode];
+  const toRate = fx.rates[to as CurrencyCode];
+  if (!fromRate || !toRate || fromRate <= 0 || toRate <= 0) return null;
+  return Math.round((amount / fromRate) * toRate);
+}
+
+export function isSupportedCurrency(value: string): value is CurrencyCode {
+  return (SUPPORTED_CURRENCIES as readonly string[]).includes(value);
+}
