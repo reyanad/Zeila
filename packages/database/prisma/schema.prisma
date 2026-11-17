@@ -191,6 +191,18 @@ enum DisputeStatus {
   CLOSED
 }
 
+enum DisputeKind {
+  CLAIM // opened by the buyer in the resolution center
+  CHARGEBACK // opened by the card holder with their bank
+}
+
+enum DisputeParty {
+  BUYER
+  SELLER
+  STAFF
+  SYSTEM
+}
+
 enum DisputeReason {
   NOT_RECEIVED
   NOT_AS_DESCRIBED
@@ -269,6 +281,11 @@ enum NotificationType {
   KYC_UPDATED
   PAYOUT_SENT
   REVIEW_RECEIVED
+  RETURN_REQUESTED
+  RETURN_UPDATED
+  REFUND_ISSUED
+  OFFER_RECEIVED
+  DISPUTE_UPDATED
   SYSTEM
 }
 
@@ -297,26 +314,27 @@ enum WebhookEventStatus {
 // ============================================================================
 
 model User {
-  id               String    @id @default(cuid())
-  email            String    @unique
-  emailVerified    DateTime?
-  hashedPassword   String?
-  name             String?
-  image            String?
-  role             UserRole  @default(BUYER)
-  phone            String?
-  country          String? // ISO-3166 alpha-2
-  defaultCurrency  String    @default("USD")
-  twoFactorEnabled Boolean   @default(false)
-  twoFactorSecret  String? // AES-256-GCM ciphertext of the base32 TOTP secret
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  emailVerified      DateTime?
+  hashedPassword     String?
+  name               String?
+  image              String?
+  role               UserRole  @default(BUYER)
+  phone              String?
+  country            String? // ISO-3166 alpha-2
+  defaultCurrency    String    @default("USD")
+  twoFactorEnabled   Boolean   @default(false)
+  twoFactorSecret    String? // AES-256-GCM ciphertext of the base32 TOTP secret
   // Bumped on password change/reset and "sign out everywhere"; JWT sessions
   // carrying an older value are rejected.
-  sessionVersion   Int       @default(0)
-  isSuspended      Boolean   @default(false)
-  suspendedReason  String?
-  lastLoginAt      DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  sessionVersion     Int       @default(0)
+  emailNotifications Boolean   @default(true)
+  isSuspended        Boolean   @default(false)
+  suspendedReason    String?
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   accounts           OauthAccount[]
   sessions           Session[]
@@ -332,6 +350,7 @@ model User {
   rmaRequests        RmaRequest[]
   disputesOpened     Dispute[]                 @relation("DisputeOpener")
   disputesResolved   Dispute[]                 @relation("DisputeResolver")
+  disputeMessages    DisputeMessage[]
   conversations      ConversationParticipant[]
   messages           Message[]
   reviewsWritten     Review[]                  @relation("ReviewAuthor")
@@ -1160,28 +1179,50 @@ model Payout {
 // ============================================================================
 
 model Dispute {
-  id           String        @id @default(cuid())
-  subOrderId   String
-  orderItemId  String?
-  openedById   String
-  reason       DisputeReason
-  description  String
-  evidence     Json          @default("[]") // [{key, fileName, note}]
-  status       DisputeStatus @default(OPEN)
-  resolution   String?
-  refundAmount Int?
-  resolvedById String?
-  resolvedAt   DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  subOrderId      String
+  orderItemId     String?
+  openedById      String
+  reason          DisputeReason
+  description     String
+  evidence        Json          @default("[]") // [{key, fileName, note}]
+  kind            DisputeKind   @default(CLAIM)
+  stripeDisputeId String?
+  respondBy       DateTime? // the party the dispute is waiting for answers by then
+  evidenceDueBy   DateTime? // chargebacks: Stripe evidence deadline
+  status          DisputeStatus @default(OPEN)
+  resolution      String?
+  refundAmount    Int?
+  resolvedById    String?
+  resolvedAt      DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
-  subOrder   SubOrder   @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
-  orderItem  OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
-  openedBy   User       @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: Restrict)
-  resolvedBy User?      @relation("DisputeResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  subOrder   SubOrder         @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  orderItem  OrderItem?       @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  openedBy   User             @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  resolvedBy User?            @relation("DisputeResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  messages   DisputeMessage[]
 
+  @@unique([stripeDisputeId, subOrderId])
   @@index([status, createdAt])
   @@index([subOrderId])
+}
+
+model DisputeMessage {
+  id          String       @id @default(cuid())
+  disputeId   String
+  authorId    String?
+  party       DisputeParty
+  body        String
+  attachments Json         @default("[]") // [{key, fileName, sizeBytes}]
+  proposal    Int? // refund the author proposes, minor units
+  createdAt   DateTime     @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  author  User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([disputeId, createdAt])
 }
 
 // ============================================================================
@@ -1190,6 +1231,8 @@ model Dispute {
 
 model Conversation {
   id        String   @id @default(cuid())
+  // "<buyerId>:<sellerId>": one thread per buyer and store
+  pairKey   String?  @unique
   subject   String?
   listingId String? // optional context
   orderId   String? // optional context
@@ -1208,6 +1251,7 @@ model ConversationParticipant {
   userId         String
   lastReadAt     DateTime?
   isMuted        Boolean   @default(false)
+  lastEmailedAt  DateTime?
   joinedAt       DateTime  @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -1245,6 +1289,7 @@ model Notification {
   body      String?
   payload   Json             @default("{}") // deep-link data
   readAt    DateTime?
+  emailedAt DateTime?
   createdAt DateTime         @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
