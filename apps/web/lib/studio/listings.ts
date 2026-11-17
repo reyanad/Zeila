@@ -14,6 +14,7 @@ import {
   type VariantAxis,
   type WholesaleTierDraft,
 } from "@marketplace/shared-types";
+import { parseShippingProfile } from "@marketplace/core";
 import { verifyTicket } from "@/lib/crypto/tokens";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { isOwnListingImage } from "@/lib/images";
@@ -527,8 +528,12 @@ export async function changeListingStatus(
       }
       const editable = await loadListingForEditor(store.id, listingId);
       if (!editable) return { ok: false, message: "That listing does not exist." };
-      const warehouseCount = await prisma.warehouse.count({ where: { storeId: store.id } });
-      const issues = publishIssues(editable.input, { warehouseCount });
+      const [warehouseCount, storeRow] = await Promise.all([
+        prisma.warehouse.count({ where: { storeId: store.id } }),
+        prisma.store.findUnique({ where: { id: store.id }, select: { shippingProfile: true } }),
+      ]);
+      const hasShippingProfile = parseShippingProfile(storeRow?.shippingProfile ?? null) !== null;
+      const issues = publishIssues(editable.input, { warehouseCount, hasShippingProfile });
       if (issues.length > 0) return { ok: false, message: "Finish these before publishing.", issues };
 
       const reviewFirst = (await getSetting("listingReviewMode")) === "pre";

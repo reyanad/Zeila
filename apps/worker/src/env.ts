@@ -15,6 +15,7 @@ const schema = z.object({
   EMBEDDINGS_API_URL: optional,
   EMBEDDINGS_API_KEY: optional,
   EMBEDDINGS_MODEL: z.string().default("text-embedding-3-small"),
+  STRIPE_SECRET_KEY: optional,
   FX_RATES_URL: z.string().url().default("https://open.er-api.com/v6/latest/USD"),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
 });

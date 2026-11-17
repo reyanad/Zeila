@@ -274,7 +274,7 @@ export interface PublishIssue {
 }
 
 /** What still blocks publishing a valid draft. Empty means ready. */
-export function publishIssues(input: ListingInput, context: { warehouseCount: number }): PublishIssue[] {
+export function publishIssues(input: ListingInput, context: { warehouseCount: number; hasShippingProfile: boolean }): PublishIssue[] {
   const issues: PublishIssue[] = [];
   if (input.description.length < 30) {
     issues.push({ path: "description", message: "Write a description of at least 30 characters" });
@@ -286,6 +286,7 @@ export function publishIssues(input: ListingInput, context: { warehouseCount: nu
       if (active.length === 0) issues.push({ path: "skus", message: "Add at least one variant that is for sale" });
       if (active.some((sku) => sku.price <= 0)) issues.push({ path: "skus", message: "Every variant for sale needs a price" });
       if (context.warehouseCount === 0) issues.push({ path: "skus", message: "Add a warehouse to ship from" });
+      if (!context.hasShippingProfile) issues.push({ path: "skus", message: "Set your shipping rates in the Studio" });
       break;
     }
     case "DIGITAL": {

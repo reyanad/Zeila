@@ -4,12 +4,13 @@ import { buttonVariants } from "@marketplace/ui";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { CurrencySwitcher } from "@/components/storefront/currency-switcher";
 import { getCurrentUser } from "@/lib/auth/session";
+import { readCartCount } from "@/lib/cart-session";
 import { getViewerCurrency } from "@/lib/storefront/fx";
 
 const navLink = "text-sm font-medium text-muted-foreground transition-colors hover:text-foreground";
 
 export async function SiteHeader() {
-  const [user, currency] = await Promise.all([getCurrentUser(), getViewerCurrency()]);
+  const [user, currency, cartCount] = await Promise.all([getCurrentUser(), getViewerCurrency(), readCartCount()]);
 
   return (
     <header className="border-b border-border bg-card">
@@ -31,6 +32,9 @@ export async function SiteHeader() {
         </form>
         <nav aria-label="Main" className="flex items-center gap-4">
           <CurrencySwitcher current={currency} />
+          <Link href="/cart" className={navLink} aria-label={`Cart, ${cartCount} item${cartCount === 1 ? "" : "s"}`}>
+            Cart{cartCount > 0 ? <span className="ml-1 rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">{cartCount}</span> : null}
+          </Link>
           {user ? (
             <>
               {isStaff(user.role) ? (
@@ -47,6 +51,9 @@ export async function SiteHeader() {
                   Sell
                 </Link>
               )}
+              <Link href="/orders" className={navLink}>
+                Orders
+              </Link>
               <Link href="/account" className={navLink}>
                 Account
               </Link>

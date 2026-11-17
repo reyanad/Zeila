@@ -6,7 +6,7 @@ import { Gallery } from "@/components/storefront/gallery";
 import { JsonLd } from "@/components/storefront/json-ld";
 import { ListingGrid, Rating } from "@/components/storefront/listing-card";
 import { Markdown } from "@/components/storefront/markdown";
-import { PurchasePanel } from "@/components/storefront/purchase-panel";
+import { ListingPurchase } from "@/components/storefront/listing-purchase";
 import { absoluteUrl, siteUrl } from "@/lib/env";
 import { countryName, listingImages, purchaseData } from "@/lib/storefront/detail";
 import { getFxRates, getViewerCurrency } from "@/lib/storefront/fx";
@@ -135,7 +135,7 @@ export default async function ListingPage({ params }: { params: Promise<{ slug: 
             {listing.summary ? <p className="text-sm text-muted-foreground">{listing.summary}</p> : null}
           </div>
           <div className="rounded-lg border border-border p-4">
-            {data ? <PurchasePanel data={data} viewerCurrency={viewerCurrency} fx={fx} /> : <p className="text-sm">Not available right now.</p>}
+            {data ? <ListingPurchase listingId={listing.id} data={data} viewerCurrency={viewerCurrency} fx={fx} /> : <p className="text-sm">Not available right now.</p>}
           </div>
           <div className="flex flex-col gap-1 rounded-lg border border-border p-4 text-sm">
             <span className="text-xs text-muted-foreground">Sold by</span>

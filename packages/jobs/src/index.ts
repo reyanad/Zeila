@@ -15,7 +15,7 @@ export type SearchJob =
   | { kind: "store"; storeId: string }
   | { kind: "all" };
 
-export type MaintenanceJob = { kind: "fx-rates" };
+export type MaintenanceJob = { kind: "fx-rates" } | { kind: "expire-orders" };
 
 /** Options for connections used by BullMQ workers (blocking commands need no retry cap). */
 export const WORKER_REDIS_OPTIONS: RedisOptions = { maxRetriesPerRequest: null, enableReadyCheck: false };

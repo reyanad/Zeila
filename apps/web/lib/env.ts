@@ -34,6 +34,7 @@ const envSchema = z.object({
   EMAIL_FROM: z.string().default("Marketplace <no-reply@example.com>"),
 
   STRIPE_SECRET_KEY: optionalString,
+  STRIPE_PUBLISHABLE_KEY: optionalString,
   STRIPE_WEBHOOK_SECRET: optionalString,
   STRIPE_CONNECT_WEBHOOK_SECRET: optionalString,
   // Country of the platform's own Stripe account. Sellers elsewhere are
@@ -120,6 +121,11 @@ export function githubOAuth(): OAuthCredentials | null {
 
 export function stripeSecretKey(): string | null {
   const key = getEnv().STRIPE_SECRET_KEY;
+  return key && !isExample(key) ? key : null;
+}
+
+export function stripePublishableKey(): string | null {
+  const key = getEnv().STRIPE_PUBLISHABLE_KEY;
   return key && !isExample(key) ? key : null;
 }
 
