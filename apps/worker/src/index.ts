@@ -1,18 +1,19 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import Stripe from "stripe";
-import { expireStaleOrders, releaseEligibleEscrows, transferPendingPayouts } from "@marketplace/core";
+import { expireStaleOrders, processDisputeDeadlines, releaseEligibleEscrows, transferPendingPayouts } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
-import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type SearchJob } from "@marketplace/jobs";
+import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type NotificationJob, type SearchJob } from "@marketplace/jobs";
 import { createSearchClient, ensureListingsIndex } from "@marketplace/search";
 import { loadEnv } from "./env";
 import { refreshFxRates } from "./fx";
+import { notificationProcessor } from "./jobs/notifications";
 import { searchProcessor } from "./jobs/search";
 
 /**
- * Background worker: keeps the search index and listing embeddings in sync
- * and refreshes exchange rates daily. Later phases add escrow release and
- * notification jobs here.
+ * Background worker: search index and embeddings, exchange rates, unpaid
+ * order expiry, escrow release and payouts, dispute deadlines, and e-mail for
+ * notifications and unread messages.
  */
 async function main(): Promise<void> {
   const env = loadEnv();
@@ -47,6 +48,11 @@ async function main(): Promise<void> {
     { name: "release-escrow", data: { kind: "release-escrow" }, opts: { ...DEFAULT_JOB_OPTIONS, attempts: 1 } },
   );
   await maintenanceQueue.upsertJobScheduler(
+    "dispute-deadlines",
+    { every: 30 * 60_000 },
+    { name: "disputes", data: { kind: "disputes" }, opts: { ...DEFAULT_JOB_OPTIONS, attempts: 1 } },
+  );
+  await maintenanceQueue.upsertJobScheduler(
     "fx-rates-daily",
     { pattern: "17 3 * * *" },
     { name: "fx-rates", data: { kind: "fx-rates" }, opts: DEFAULT_JOB_OPTIONS },
@@ -66,6 +72,10 @@ async function main(): Promise<void> {
           const transferred = stripe ? await transferPendingPayouts(stripe) : 0;
           return `released ${released} escrows, transferred ${transferred}${stripe ? "" : " (Stripe not configured)"}`;
         }
+        case "disputes": {
+          const result = await processDisputeDeadlines(new Date());
+          return `disputes: ${result.escalated} escalated, ${result.closed} closed`;
+        }
         case "fx-rates": {
           const fx = await refreshFxRates(env.FX_RATES_URL);
           // Cross-currency sort prices depend on the rates.
@@ -77,7 +87,14 @@ async function main(): Promise<void> {
     { connection, concurrency: 1 },
   );
 
-  for (const worker of [searchWorker, maintenanceWorker]) {
+  const notificationWorker = new Worker<NotificationJob, string>(
+    QUEUE_NAMES.notifications,
+    notificationProcessor({ resendApiKey: env.RESEND_API_KEY, emailFrom: env.EMAIL_FROM, appUrl: env.NEXT_PUBLIC_APP_URL, brand: env.APP_NAME }),
+    { connection, concurrency: Math.min(env.WORKER_CONCURRENCY, 4) },
+  );
+  if (!env.RESEND_API_KEY) console.warn("[worker] RESEND_API_KEY not set: notification e-mails are logged, not sent");
+
+  for (const worker of [searchWorker, maintenanceWorker, notificationWorker]) {
     worker.on("failed", (job, error) => console.error(`[worker] ${worker.name}/${job?.name ?? "?"} ${job?.id ?? ""} failed: ${error.message}`));
     worker.on("completed", (job, result) => console.log(`[worker] ${worker.name}/${job.name} ${job.id ?? ""}: ${String(result)}`));
   }
@@ -85,7 +102,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string) => {
     console.log(`[worker] ${signal} received, finishing current jobs`);
-    await Promise.allSettled([searchWorker.close(), maintenanceWorker.close(), searchQueue.close(), maintenanceQueue.close()]);
+    await Promise.allSettled([searchWorker.close(), maintenanceWorker.close(), notificationWorker.close(), searchQueue.close(), maintenanceQueue.close()]);
     await prisma.$disconnect();
     connection.disconnect();
     process.exit(0);
