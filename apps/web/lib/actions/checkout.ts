@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { abandonPendingOrders, CheckoutError, completeOrderPayment, placeOrder } from "@marketplace/core";
+import { cookies } from "next/headers";
+import { abandonPendingOrders, AFFILIATE_COOKIE, attributeOrder, CheckoutError, completeOrderPayment, placeOrder } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { addressSchema, countryCodeSchema, fieldErrors, isSupportedCurrency, type AddressSnapshot } from "@marketplace/shared-types";
 import { recordAudit } from "@/lib/audit";
@@ -115,6 +116,9 @@ export async function placeOrderAction(currency: string, addressId: string | nul
     if (error instanceof CheckoutError) return { ok: false, message: error.message };
     throw error;
   }
+
+  const referral = (await cookies()).get(AFFILIATE_COOKIE)?.value ?? null;
+  if (referral) await attributeOrder(order.id, auth.user.id, referral).catch((error: unknown) => console.error("[affiliates] attribution failed", error));
 
   await recordAudit({
     actorId: auth.user.id,

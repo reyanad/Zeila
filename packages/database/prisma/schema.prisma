@@ -505,6 +505,7 @@ model Store {
   subOrders      SubOrder[]
   payouts        Payout[]
   promoCodes     PromoCode[]
+  flashSales     FlashSale[]
   ledgerAccounts LedgerAccount[]
   fraudFlags     FraudFlag[]     @relation("FraudFlagStore")
 
@@ -601,9 +602,9 @@ model Listing {
   embeddingHash  String?
   embeddedAt     DateTime?
 
-  store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
-  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  moderatedBy  User?         @relation("ListingModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+  store        Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  category     Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  moderatedBy  User?              @relation("ListingModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
   skus         Sku[]
   digitalAsset DigitalAsset?
   serviceTiers ServiceTier[]
@@ -611,7 +612,9 @@ model Listing {
   cartItems    CartItem[]
   orderItems   OrderItem[]
   reviews      Review[]
-  fraudFlags   FraudFlag[]   @relation("FraudFlagListing")
+  flashSales   FlashSaleListing[]
+  viewDays     ListingViewDaily[]
+  fraudFlags   FraudFlag[]        @relation("FraudFlagListing")
 
   @@index([storeId, status])
   @@index([type, status])
@@ -1331,7 +1334,8 @@ model Affiliate {
   id            String          @id @default(cuid())
   userId        String          @unique
   code          String          @unique
-  commissionBps Int             @default(300) // 3% of platform fee share
+  // Share of the platform's commission on referred orders (2000 = 20%), so referrals never cost sellers.
+  commissionBps Int             @default(2000)
   status        AffiliateStatus @default(ACTIVE)
   clicks        Int             @default(0)
   createdAt     DateTime        @default(now())
@@ -1440,4 +1444,48 @@ model InventoryReservation {
 
   @@index([status, expiresAt])
   @@index([orderItemId])
+}
+
+/// A store's time-boxed discount on chosen listings.
+model FlashSale {
+  id          String   @id @default(cuid())
+  storeId     String
+  name        String
+  discountBps Int // 2000 = 20% off
+  startsAt    DateTime
+  endsAt      DateTime
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  store    Store              @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  listings FlashSaleListing[]
+
+  @@index([storeId, endsAt])
+  @@index([isActive, startsAt, endsAt])
+}
+
+model FlashSaleListing {
+  flashSaleId String
+  listingId   String
+  /// Units available at the sale price; null = no limit.
+  quantityCap Int?
+  soldCount   Int    @default(0)
+
+  flashSale FlashSale @relation(fields: [flashSaleId], references: [id], onDelete: Cascade)
+  listing   Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([flashSaleId, listingId])
+  @@index([listingId])
+}
+
+/// Listing page views per UTC day, for seller analytics.
+model ListingViewDaily {
+  listingId String
+  day       DateTime @db.Date
+  views     Int      @default(0)
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, day])
+  @@index([day])
 }

@@ -1,6 +1,8 @@
 import type Stripe from "stripe";
 import { prisma } from "@marketplace/database";
 import { fulfillPaidOrder } from "./fulfillment";
+import { recordReferralForPaidOrder } from "./affiliates";
+import { releaseFlashUnits } from "./flash-sales";
 import { commitReservations, releaseReservations } from "./inventory";
 import { displayAmount, notify } from "./notifications";
 import { getSetting } from "./settings";
@@ -69,7 +71,10 @@ export async function completeOrderPayment(receipt: PaymentReceipt): Promise<Pay
     },
     { timeout: 30_000 },
   );
-  if (outcome === "completed") await notifyOrderPaid(receipt.orderId);
+  if (outcome === "completed") {
+    await notifyOrderPaid(receipt.orderId);
+    await recordReferralForPaidOrder(receipt.orderId).catch((error: unknown) => console.error("[affiliates] could not record referral", error));
+  }
   return outcome;
 }
 
@@ -110,6 +115,7 @@ export async function cancelUnpaidOrder(orderId: string): Promise<boolean> {
     const claimed = await tx.order.updateMany({ where: { id: orderId, status: "PENDING_PAYMENT" }, data: { status: "CANCELLED", cancelledAt: new Date() } });
     if (claimed.count === 0) return false;
     await tx.subOrder.updateMany({ where: { orderId }, data: { status: "CANCELLED", cancelledAt: new Date() } });
+    await releaseFlashUnits(tx, orderId);
     await tx.payment.updateMany({ where: { orderId, status: { in: ["REQUIRES_ACTION", "PROCESSING", "FAILED"] } }, data: { status: "CANCELLED" } });
     await tx.promoRedemption.deleteMany({ where: { orderId } });
     await releaseReservations(tx, orderId);

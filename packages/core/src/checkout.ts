@@ -2,7 +2,8 @@ import { randomBytes } from "node:crypto";
 import { prisma, type Prisma } from "@marketplace/database";
 import { applyBps, CHECKOUT_HOLD_MINUTES, type AddressSnapshot, type ListingTypeValue } from "@marketplace/shared-types";
 import type { CartWithItems } from "./cart";
-import { availableStock, checkLine, parseShippingProfile, variantLabel } from "./catalog";
+import { availableStock, checkLine, parseShippingProfile, variantLabel, type LineCheck } from "./catalog";
+import { activeFlashDeals, applyFlash, claimFlashUnits, type FlashDeal } from "./flash-sales";
 import { CheckoutError } from "./errors";
 import { reserveStock } from "./inventory";
 import { priceCheckout, type PricingLine } from "./pricing";
@@ -25,6 +26,8 @@ export interface QuoteItem {
   priceAtAdd: number;
   maxQuantity: number;
   problem: string | null;
+  /** The flash sale price applied to this line, if any. */
+  flash: { flashSaleId: string; name: string; discountBps: number; endsAt: string; capped: boolean } | null;
 }
 
 export interface QuoteStore {
@@ -87,11 +90,19 @@ export async function buildQuote(params: QuoteParams): Promise<Quote> {
   const items = cart.items.filter((item) => item.listing.currency === currency);
   const otherCurrencies = cartCurrencies(cart).filter((code) => code !== currency);
 
-  const checks = new Map(items.map((item) => [item.id, checkLine(item, item.quantity)]));
-  const sellable = items.filter((item) => checks.get(item.id)?.ok);
+  const deals = await activeFlashDeals(items.map((item) => item.listingId), params.now);
+  const checks = new Map<string, { check: LineCheck; deal: FlashDeal | null }>(
+    items.map((item) => {
+      const check = checkLine(item, item.quantity);
+      if (!check.ok) return [item.id, { check, deal: null }];
+      const flash = applyFlash(check.unitPrice, item.quantity, deals.get(item.listingId));
+      return [item.id, { check: { ...check, unitPrice: flash.unitPrice }, deal: flash.deal }];
+    }),
+  );
+  const sellable = items.filter((item) => checks.get(item.id)?.check.ok);
 
   const lines: PricingLine[] = sellable.map((item) => {
-    const check = checks.get(item.id);
+    const check = checks.get(item.id)?.check;
     return {
       key: item.id,
       storeId: item.listing.storeId,
@@ -151,7 +162,8 @@ export async function buildQuote(params: QuoteParams): Promise<Quote> {
       };
       quoteStores.push(store);
     }
-    const check = checks.get(item.id);
+    const entry = checks.get(item.id);
+    const check = entry?.check;
     const priced = pricedLines.get(item.id);
     store.items.push({
       id: item.id,
@@ -168,6 +180,7 @@ export async function buildQuote(params: QuoteParams): Promise<Quote> {
       priceAtAdd: item.unitPriceSnapshot,
       maxQuantity: check?.ok ? check.maxQuantity : item.listing.type === "PHYSICAL" ? availableStock(item) : 1,
       problem: check && !check.ok ? check.problem : null,
+      flash: entry?.deal ? { flashSaleId: entry.deal.flashSaleId, name: entry.deal.name, discountBps: entry.deal.discountBps, endsAt: entry.deal.endsAt.toISOString(), capped: entry.deal.remaining !== null } : null,
     });
   }
 
@@ -292,6 +305,8 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlacedOrder>
                     deliveryDays: item.serviceTier?.deliveryDays ?? null,
                     revisions: item.serviceTier?.revisions ?? null,
                     discount: quoted.discount,
+                    flashSaleId: quoted.flash?.flashSaleId ?? null,
+                    flashDiscountBps: quoted.flash?.discountBps ?? null,
                   },
                   quantity: quoted.quantity,
                   unitPrice: quoted.unitPrice,
@@ -299,6 +314,7 @@ export async function placeOrder(params: PlaceOrderParams): Promise<PlacedOrder>
                 },
                 select: { id: true },
               });
+              if (quoted.flash?.capped) await claimFlashUnits(tx, quoted.flash.flashSaleId, item.listingId, quoted.quantity, item.listing.title);
               if (item.listing.type === "PHYSICAL" && item.sku) {
                 await reserveStock(tx, {
                   orderItemId: orderItem.id,

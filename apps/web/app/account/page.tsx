@@ -68,6 +68,24 @@ export default async function AccountPage() {
           </CardContent>
         </Card>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>More</CardTitle>
+          <CardDescription>Cases, alerts and the referral program.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Link href="/disputes" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Resolution center
+          </Link>
+          <Link href="/notifications" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Notification settings
+          </Link>
+          <Link href="/affiliates" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            Earn by referring buyers
+          </Link>
+        </CardContent>
+      </Card>
     </>
   );
 }

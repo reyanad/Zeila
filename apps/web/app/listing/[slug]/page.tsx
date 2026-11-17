@@ -6,12 +6,16 @@ import { Gallery } from "@/components/storefront/gallery";
 import { JsonLd } from "@/components/storefront/json-ld";
 import { ListingGrid, Rating } from "@/components/storefront/listing-card";
 import { Markdown } from "@/components/storefront/markdown";
+import { Countdown } from "@/components/growth/countdown";
+import { ListingReviews } from "@/components/growth/listing-reviews";
+import { ViewBeacon } from "@/components/growth/view-beacon";
 import { ContactSellerButton } from "@/components/messages/contact-seller-button";
 import { ListingPurchase } from "@/components/storefront/listing-purchase";
 import { absoluteUrl, siteUrl } from "@/lib/env";
 import { countryName, listingImages, purchaseData } from "@/lib/storefront/detail";
 import { getFxRates, getViewerCurrency } from "@/lib/storefront/fx";
 import { categoryTrail, loadPublicListingBySlug, similarListings } from "@/lib/storefront/listings";
+import { dealsFor, withDeal } from "@/lib/storefront/deals";
 
 const TYPE_LABEL = { PHYSICAL: "Product", DIGITAL: "Digital download", SERVICE: "Service" } as const;
 
@@ -44,14 +48,17 @@ export default async function ListingPage({ params }: { params: Promise<{ slug: 
   const listing = await loadPublicListingBySlug(slug);
   if (!listing) notFound();
 
-  const [fx, viewerCurrency, trail, similar] = await Promise.all([
+  const [fx, viewerCurrency, trail, similar, deals] = await Promise.all([
     getFxRates(),
     getViewerCurrency(),
     listing.category ? categoryTrail(listing.category.path) : Promise.resolve([]),
     similarListings({ id: listing.id, categoryId: listing.categoryId }),
+    dealsFor([listing.id]),
   ]);
+  const deal = deals[listing.id];
   const images = listingImages(listing);
-  const data = purchaseData(listing);
+  const base = purchaseData(listing);
+  const data = base ? withDeal(base, deal) : null;
   const inStock = data?.type !== "PHYSICAL" || data.skus.some((sku) => sku.available > 0);
   const url = siteUrl(`/listing/${listing.slug}`);
 
@@ -135,6 +142,17 @@ export default async function ListingPage({ params }: { params: Promise<{ slug: 
             <Rating average={Number(listing.ratingAvg)} count={listing.ratingCount} />
             {listing.summary ? <p className="text-sm text-muted-foreground">{listing.summary}</p> : null}
           </div>
+          {deal ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-destructive/10 px-4 py-3 text-sm">
+              <span className="font-semibold text-destructive">
+                {deal.name}: {Math.round(deal.discountBps / 100)}% off
+                {deal.remaining !== null ? <span className="ml-2 font-normal">{deal.remaining} left at this price</span> : null}
+              </span>
+              <span className="text-xs">
+                Ends in <Countdown endsAt={deal.endsAt} className="font-mono font-medium" />
+              </span>
+            </div>
+          ) : null}
           <div className="rounded-lg border border-border p-4">
             {data ? <ListingPurchase listingId={listing.id} data={data} viewerCurrency={viewerCurrency} fx={fx} /> : <p className="text-sm">Not available right now.</p>}
           </div>
@@ -152,6 +170,9 @@ export default async function ListingPage({ params }: { params: Promise<{ slug: 
           </div>
         </aside>
       </div>
+
+      <ViewBeacon listingId={listing.id} />
+      <ListingReviews listingId={listing.id} average={Number(listing.ratingAvg)} count={listing.ratingCount} />
 
       {similar.length > 0 ? (
         <section aria-labelledby="similar-heading" className="flex flex-col gap-4">

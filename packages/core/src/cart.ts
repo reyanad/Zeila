@@ -1,6 +1,7 @@
 import { prisma, type Prisma } from "@marketplace/database";
 import { MAX_CART_QUANTITY, type AddToCartPayload } from "@marketplace/shared-types";
 import { checkLine, purchasableInclude, type PurchasableLine } from "./catalog";
+import { activeFlashDeals, applyFlash } from "./flash-sales";
 import { CheckoutError } from "./errors";
 
 export type CartOwner = { userId: string } | { anonToken: string };
@@ -106,15 +107,17 @@ export async function addToCart(cartId: string, payload: AddToCartPayload): Prom
   const quantity = single ? 1 : Math.min(MAX_CART_QUANTITY, existingQuantity + payload.quantity);
   const check = checkLine(line, quantity);
   if (!check.ok) throw new CheckoutError(check.problem);
+  const deals = await activeFlashDeals([line.listingId], new Date());
+  const unitPrice = applyFlash(check.unitPrice, quantity, deals.get(line.listingId)).unitPrice;
 
   const cart = await prisma.cart.findUniqueOrThrow({ where: { id: cartId }, select: { items: { select: { listing: { select: { currency: true } } } } } });
   if (cart.items.length >= 100 && !existingId) throw new CheckoutError("Your cart is full. Check out or remove something first.");
 
   if (existingId) {
-    await prisma.cartItem.update({ where: { id: existingId }, data: { quantity, unitPriceSnapshot: check.unitPrice } });
+    await prisma.cartItem.update({ where: { id: existingId }, data: { quantity, unitPriceSnapshot: unitPrice } });
   } else {
     await prisma.cartItem.create({
-      data: { cartId, listingId: line.listingId, skuId: line.skuId, serviceTierId: line.serviceTierId, quantity, unitPriceSnapshot: check.unitPrice },
+      data: { cartId, listingId: line.listingId, skuId: line.skuId, serviceTierId: line.serviceTierId, quantity, unitPriceSnapshot: unitPrice },
     });
   }
   await prisma.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
@@ -130,7 +133,8 @@ export async function setCartItemQuantity(cartId: string, itemId: string, quanti
   const next = item.listing.type === "PHYSICAL" ? Math.min(MAX_CART_QUANTITY, quantity) : 1;
   const check = checkLine(item, next);
   if (!check.ok) throw new CheckoutError(check.problem);
-  await prisma.cartItem.update({ where: { id: item.id }, data: { quantity: next, unitPriceSnapshot: check.unitPrice } });
+  const deals = await activeFlashDeals([item.listingId], new Date());
+  await prisma.cartItem.update({ where: { id: item.id }, data: { quantity: next, unitPriceSnapshot: applyFlash(check.unitPrice, next, deals.get(item.listingId)).unitPrice } });
 }
 
 export async function removeCartItem(cartId: string, itemId: string): Promise<void> {

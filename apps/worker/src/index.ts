@@ -1,7 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import Stripe from "stripe";
-import { expireStaleOrders, processDisputeDeadlines, releaseEligibleEscrows, transferPendingPayouts } from "@marketplace/core";
+import { expireStaleOrders, processDisputeDeadlines, releaseEligibleEscrows, settleReferrals, transferPendingPayouts } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type NotificationJob, type SearchJob } from "@marketplace/jobs";
 import { createSearchClient, ensureListingsIndex } from "@marketplace/search";
@@ -70,7 +70,8 @@ async function main(): Promise<void> {
           const now = new Date();
           const released = await releaseEligibleEscrows(now);
           const transferred = stripe ? await transferPendingPayouts(stripe) : 0;
-          return `released ${released} escrows, transferred ${transferred}${stripe ? "" : " (Stripe not configured)"}`;
+          const referrals = await settleReferrals(now);
+          return `released ${released} escrows, transferred ${transferred}${stripe ? "" : " (Stripe not configured)"}, referrals ${referrals.approved} approved / ${referrals.reversed} reversed`;
         }
         case "disputes": {
           const result = await processDisputeDeadlines(new Date());
