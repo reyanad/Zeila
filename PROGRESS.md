@@ -96,7 +96,18 @@ split orders, Stripe Connect escrow, double-entry ledger.
       rating breakdown on listings, seller replies (`/seller/studio/reviews`); seller analytics
       (`/seller/studio/analytics`): sales, orders, average order, conversion, refunds, rating,
       escrow and payout balances, daily sales and views charts with a table view, top listings.
-- [ ] Phase 10 — Super-admin command center
+- [x] **Phase 10 — Admin command center** (`/admin`, every section gated by its own
+      permission and audited): overview of waiting queues; identity checks with decrypted
+      documents shown only to reviewers (every view audited, ID numbers masked, no self-review),
+      approve/reject with a note to the seller, store status recalculated; listing moderation
+      (pre-publish queue, find and take down live listings); review moderation (hide/restore,
+      rating recalculated); resolution center queues (Phase 8); fraud desk (open flags,
+      repeated off-platform attempts from chat screening, stores with card disputes); users
+      (search, suspend with sign-out everywhere and store suspension, reinstate, role changes
+      by super admins only); ledger (trial balance per currency, escrow and payable reconciled
+      against order records, platform accounts, affiliate payouts recorded to the ledger,
+      chargeback losses to recover, latest journal entries); platform settings (fee, protection
+      window, listing review mode, tax table validated against its schema); audit log viewer.
 - [ ] Phase 11 — Expo mobile app
 - [ ] Phase 12 — Tests, hardening, CI/CD
 
@@ -288,8 +299,10 @@ chart to an image to check labels and layout.
   payouts by the same amount.
 - **Disputes after payout.** Default chosen: buyers can open a case only while the seller's
   payment is held (delivery + `escrow_hold_days`). After that, support handles it manually.
-- **KYC review** happens in the admin command center (Phase 10). Until then, submissions stay
-  `PENDING` and stores stay in `PENDING_REVIEW`.
+- **First super admin.** Put your address in `SUPER_ADMIN_EMAILS`, sign up with it and verify
+  it; the first sign-in promotes it to super admin. Promote moderators from `/admin/users`.
+- **Affiliate payouts** are recorded manually in `/admin/ledger` after paying by bank or mobile
+  money; automatic payouts need a payout provider that supports the affiliates' countries.
 
 ## Conventions
 
