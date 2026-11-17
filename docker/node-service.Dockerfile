@@ -18,6 +18,8 @@ ENV ENTRY=$ENTRY
 COPY --from=prune /app/out/json/ .
 RUN npm ci --include=dev && npm cache clean --force
 COPY --from=prune /app/out/full/ .
+# `turbo prune` copies workspaces only; the shared compiler settings live at the root.
+COPY tsconfig.base.json ./
 RUN npm run db:generate && groupadd --system app && useradd --system --gid app --home /app app && chown -R app:app /app
 ENV NODE_ENV=production
 USER app

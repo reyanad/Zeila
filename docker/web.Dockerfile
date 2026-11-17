@@ -14,6 +14,8 @@ FROM base AS build
 COPY --from=prune /app/out/json/ .
 RUN npm ci
 COPY --from=prune /app/out/full/ .
+# `turbo prune` copies workspaces only; the shared compiler settings live at the root.
+COPY tsconfig.base.json ./
 # Public values are inlined into the browser bundle at build time.
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 ARG NEXT_PUBLIC_REALTIME_URL=
