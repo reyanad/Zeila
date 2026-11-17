@@ -6,6 +6,7 @@ export default defineConfig({
   schema: path.join("prisma", "schema.prisma"),
   migrations: {
     path: path.join("prisma", "migrations"),
+    seed: "tsx prisma/seed.ts",
   },
   // Used by `prisma migrate` / `prisma db` CLI commands (Prisma 7 reads the
   // connection URL from here, not from the schema file).

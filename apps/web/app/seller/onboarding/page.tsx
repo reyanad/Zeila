@@ -113,7 +113,7 @@ export default async function SellerOnboardingPage({
   const payouts = payoutState(store?.stripeOnboarding, store?.payoutsEnabled ?? false, hasStore);
 
   return (
-    <>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight">Seller setup</h1>
         <p className="text-sm text-muted-foreground">
@@ -210,12 +210,19 @@ export default async function SellerOnboardingPage({
 
       {store?.status === "ACTIVE" ? (
         <Alert tone="success" title="You are ready to sell">
-          Your store is open. Listing tools arrive in the Vendor Studio.{" "}
-          <Link href="/account" className="font-medium underline underline-offset-4">
-            Back to your account
+          Your store is open.{" "}
+          <Link href="/seller/studio" className="font-medium underline underline-offset-4">
+            Go to the Vendor Studio
           </Link>
         </Alert>
+      ) : store ? (
+        <p className="text-sm text-muted-foreground">
+          You can start preparing listings while you finish setup.{" "}
+          <Link href="/seller/studio" className="font-medium underline underline-offset-4">
+            Open the Vendor Studio
+          </Link>
+        </p>
       ) : null}
-    </>
+    </div>
   );
 }

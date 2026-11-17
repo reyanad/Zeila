@@ -28,3 +28,28 @@ export function formatMoney(money: Money, locale = "en-US"): string {
 export function applyBps(amount: MinorUnits, bps: number): MinorUnits {
   return Math.round((amount * bps) / 10_000);
 }
+
+/** Largest price accepted anywhere: 10,000,000.00 in major units. */
+export const MAX_PRICE_MINOR: MinorUnits = 1_000_000_000;
+
+/**
+ * Parse a price typed by a person ("12", "12.5", "1,299.99") into minor
+ * units without floating point. Returns null for anything that is not a
+ * non-negative amount with at most two decimals.
+ */
+export function parseMoneyInput(input: string): MinorUnits | null {
+  const cleaned = input.trim().replace(/[,\s]/g, "");
+  const match = /^(\d{1,10})(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (!match) return null;
+  const whole = Number(match[1]);
+  const fraction = Number((match[2] ?? "").padEnd(2, "0"));
+  const minor = whole * 100 + fraction;
+  return minor <= MAX_PRICE_MINOR ? minor : null;
+}
+
+/** Minor units to an editable string: 1250 -> "12.50", 1200 -> "12". */
+export function minorToInput(amount: MinorUnits): string {
+  const whole = Math.trunc(amount / 100);
+  const fraction = Math.abs(amount % 100);
+  return fraction === 0 ? String(whole) : `${whole}.${String(fraction).padStart(2, "0")}`;
+}

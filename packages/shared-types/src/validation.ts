@@ -182,3 +182,18 @@ export function fieldErrors(error: z.ZodError): Record<string, string> {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Warehouses
+// ---------------------------------------------------------------------------
+
+export const warehouseSchema = z.object({
+  name: z.string().trim().min(2, "Name this warehouse").max(60, "Name is too long"),
+  line1: z.string().trim().min(3, "Enter the street address").max(120, "Address is too long"),
+  line2: z.string().trim().max(120, "Address is too long"),
+  city: z.string().trim().min(2, "Enter the city").max(80, "City is too long"),
+  state: z.string().trim().max(80, "Region is too long"),
+  postalCode: z.string().trim().max(20, "Postal code is too long"),
+  country: countryCodeSchema,
+});
+export type WarehouseInput = z.infer<typeof warehouseSchema>;

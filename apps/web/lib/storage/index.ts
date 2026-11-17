@@ -1,7 +1,18 @@
 import "server-only";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readFile, rm, stat as statFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { Upload } from "@aws-sdk/lib-storage";
 import { decryptObject, encryptObject } from "@/lib/crypto/encryption";
 import { getEnv, isProduction, s3Settings } from "@/lib/env";
 
@@ -22,6 +33,12 @@ export interface ObjectStorage {
   /** Object bytes, or null when the key does not exist. */
   get(bucket: BucketKind, key: string): Promise<Buffer | null>;
   remove(bucket: BucketKind, key: string): Promise<void>;
+  /** Stream an object of unknown length (multipart upload on S3). */
+  putStream(bucket: BucketKind, key: string, body: Readable, contentType: string): Promise<void>;
+  /** Object size in bytes, or null when the key does not exist. */
+  size(bucket: BucketKind, key: string): Promise<number | null>;
+  /** Stream bytes [start, end] (inclusive), or the whole object. */
+  getStream(bucket: BucketKind, key: string, range?: { start: number; end: number }): Promise<Readable>;
 }
 
 const KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9/_.-]{0,511}$/;
@@ -65,6 +82,41 @@ class S3Storage implements ObjectStorage {
     assertValidKey(key);
     await this.client.send(new DeleteObjectCommand({ Bucket: bucketName(bucket), Key: key }));
   }
+
+  async putStream(bucket: BucketKind, key: string, body: Readable, contentType: string): Promise<void> {
+    assertValidKey(key);
+    const upload = new Upload({
+      client: this.client,
+      params: { Bucket: bucketName(bucket), Key: key, Body: body, ContentType: contentType },
+      queueSize: 4,
+      partSize: 8 * 1024 * 1024,
+    });
+    await upload.done();
+  }
+
+  async size(bucket: BucketKind, key: string): Promise<number | null> {
+    assertValidKey(key);
+    try {
+      const head = await this.client.send(new HeadObjectCommand({ Bucket: bucketName(bucket), Key: key }));
+      return head.ContentLength ?? null;
+    } catch (error) {
+      if (error instanceof Error && (error.name === "NotFound" || error.name === "NoSuchKey")) return null;
+      throw error;
+    }
+  }
+
+  async getStream(bucket: BucketKind, key: string, range?: { start: number; end: number }): Promise<Readable> {
+    assertValidKey(key);
+    const response = await this.client.send(
+      new GetObjectCommand({
+        Bucket: bucketName(bucket),
+        Key: key,
+        Range: range ? `bytes=${range.start}-${range.end}` : undefined,
+      }),
+    );
+    if (!response.Body) throw new Error(`Object ${key} has no body`);
+    return Readable.fromWeb(response.Body.transformToWebStream() as WebReadableStream<Uint8Array>);
+  }
 }
 
 class LocalStorage implements ObjectStorage {
@@ -97,6 +149,25 @@ class LocalStorage implements ObjectStorage {
 
   async remove(bucket: BucketKind, key: string): Promise<void> {
     await rm(this.filePath(bucket, key), { force: true });
+  }
+
+  async putStream(bucket: BucketKind, key: string, body: Readable): Promise<void> {
+    const target = this.filePath(bucket, key);
+    await mkdir(path.dirname(target), { recursive: true });
+    await pipeline(body, createWriteStream(target));
+  }
+
+  async size(bucket: BucketKind, key: string): Promise<number | null> {
+    try {
+      return (await statFile(this.filePath(bucket, key))).size;
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async getStream(bucket: BucketKind, key: string, range?: { start: number; end: number }): Promise<Readable> {
+    return createReadStream(this.filePath(bucket, key), range ? { start: range.start, end: range.end } : undefined);
   }
 }
 

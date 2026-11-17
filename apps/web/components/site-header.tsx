@@ -23,9 +23,15 @@ export async function SiteHeader() {
                   Admin
                 </Link>
               ) : null}
-              <Link href="/seller/onboarding" className={navLink}>
-                {user.role === "SELLER" ? "Seller setup" : "Sell"}
-              </Link>
+              {user.role === "SELLER" || user.role === "SUPER_ADMIN" ? (
+                <Link href="/seller/studio" className={navLink}>
+                  Studio
+                </Link>
+              ) : (
+                <Link href="/seller/onboarding" className={navLink}>
+                  Sell
+                </Link>
+              )}
               <Link href="/account" className={navLink}>
                 Account
               </Link>
