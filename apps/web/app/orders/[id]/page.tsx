@@ -3,14 +3,30 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@marketplace/database";
 import { Alert, Badge, buttonVariants } from "@marketplace/ui";
+import { RETURN_REASONS, isReturnReason } from "@marketplace/shared-types";
 import { ConfirmReceivedButton } from "@/components/orders/confirm-received-button";
 import { PaymentPending } from "@/components/orders/payment-pending";
+import { ReturnRequestForm } from "@/components/orders/return-request-form";
+import { ReturnTrackingForm } from "@/components/orders/return-tracking-form";
+import { Tracking } from "@/components/orders/tracking";
 import { formatPrice } from "@/components/storefront/price";
 import { requireUser } from "@/lib/auth/session";
 import { ORDER_STATUS, SUB_ORDER_STATUS } from "@/lib/orders/labels";
 
 export const metadata: Metadata = { title: "Order", robots: { index: false } };
 export const dynamic = "force-dynamic";
+
+const RETURN_STATUS: Record<string, string> = {
+  REQUESTED: "Return requested, waiting for the seller",
+  APPROVED: "Return approved: send the item back and add the tracking number",
+  AWAITING_RETURN: "On its way back to the seller",
+  RECEIVED: "Received by the seller",
+  REFUNDED: "Refunded",
+  REJECTED: "Return declined by the seller",
+  REPLACED: "Replaced",
+  CLOSED: "Closed",
+};
+const OPEN_RETURN = ["REQUESTED", "APPROVED", "AWAITING_RETURN", "RECEIVED"];
 
 interface AddressView {
   recipient?: string;
@@ -31,7 +47,8 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
       subOrders: {
         include: {
           store: { select: { name: true, slug: true } },
-          escrow: { select: { status: true, holdUntil: true } },
+          escrow: { select: { status: true, holdUntil: true, frozenReason: true } },
+          shipments: { orderBy: { createdAt: "asc" }, select: { id: true, carrier: true, trackingNumber: true, trackingUrl: true, status: true, events: true } },
           items: {
             select: {
               id: true,
@@ -41,6 +58,8 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
               unitPrice: true,
               lineTotal: true,
               listingType: true,
+              status: true,
+              rmaRequests: { orderBy: { createdAt: "desc" }, select: { id: true, reason: true, status: true, sellerNote: true, refundAmount: true } },
               downloadGrants: { select: { id: true, downloadsUsed: true, digitalAsset: { select: { fileName: true, downloadLimit: true } } } },
               licenseKey: { select: { key: true, status: true, activationsLimit: true } },
             },
@@ -134,6 +153,28 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                         </div>
                       );
                     })}
+                    {item.listingType === "SERVICE" && subOrder.status !== "REFUNDED" ? (
+                      <Link href={`/orders/${order.id}/work/${item.id}`} className={buttonVariants({ size: "sm", variant: item.status === "DELIVERED" ? "default" : "outline" })}>
+                        {item.status === "DELIVERED" ? "Review the delivery" : "Open workspace"}
+                      </Link>
+                    ) : null}
+                    {item.rmaRequests.map((rma) => (
+                      <div key={rma.id} className="flex flex-col gap-2 rounded-md border border-border px-3 py-2">
+                        <span className="text-sm">
+                          {RETURN_STATUS[rma.status] ?? rma.status}
+                          {rma.refundAmount !== null && rma.status === "REFUNDED" ? `: ${money(rma.refundAmount)}` : ""}
+                          <span className="block text-xs text-muted-foreground">Reason: {isReturnReason(rma.reason) ? RETURN_REASONS[rma.reason] : rma.reason}</span>
+                        </span>
+                        {rma.sellerNote ? <p className="whitespace-pre-wrap text-xs">Seller: {rma.sellerNote}</p> : null}
+                        {rma.status === "APPROVED" ? <ReturnTrackingForm orderId={order.id} rmaId={rma.id} /> : null}
+                      </div>
+                    ))}
+                    {item.listingType === "PHYSICAL" &&
+                    item.status === "DELIVERED" &&
+                    (subOrder.escrow?.status === "HELD" || subOrder.escrow?.status === "FROZEN") &&
+                    !item.rmaRequests.some((rma) => OPEN_RETURN.includes(rma.status)) ? (
+                      <ReturnRequestForm orderId={order.id} orderItemId={item.id} maxQuantity={item.quantity} />
+                    ) : null}
                     {item.licenseKey ? (
                       <div className="rounded-md border border-border px-3 py-2">
                         <span className="text-xs text-muted-foreground">Licence key ({item.licenseKey.activationsLimit} device{item.licenseKey.activationsLimit === 1 ? "" : "s"})</span>
@@ -144,6 +185,9 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                 );
               })}
             </ul>
+            {subOrder.shipments.map((shipment) => (
+              <Tracking key={shipment.id} shipment={shipment} />
+            ))}
             {subOrder.escrow?.status === "HELD" && (subOrder.status === "SHIPPED" || subOrder.status === "DELIVERED") ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/60 px-3 py-2 text-sm">
                 <span>
@@ -152,7 +196,9 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                 <ConfirmReceivedButton orderId={order.id} subOrderId={subOrder.id} storeName={subOrder.store.name} />
               </div>
             ) : null}
-            {subOrder.escrow?.status === "FROZEN" ? <p className="text-sm text-muted-foreground">Payment is on hold while a dispute is reviewed.</p> : null}
+            {subOrder.escrow?.status === "FROZEN" ? (
+              <p className="text-sm text-muted-foreground">The seller's payment is on hold: {subOrder.escrow.frozenReason ?? "under review"}.</p>
+            ) : null}
             <dl className="grid grid-cols-[1fr_auto] gap-x-4 text-sm text-muted-foreground">
               {subOrder.discountTotal > 0 ? (
                 <>

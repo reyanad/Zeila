@@ -20,22 +20,24 @@ export async function releaseEscrowNow(escrowId: string, now: Date, reason: stri
   return prisma.$transaction(async (tx) => {
     const escrow = await tx.escrow.findUnique({
       where: { id: escrowId },
-      select: { id: true, amount: true, subOrder: { select: { id: true, orderId: true, storeId: true, currency: true, status: true } } },
+      select: { id: true, amount: true, refunded: true, subOrder: { select: { id: true, orderId: true, storeId: true, currency: true, status: true } } },
     });
     if (!escrow) return false;
-    const claimed = await tx.escrow.updateMany({ where: { id: escrow.id, status: "HELD" }, data: { status: "RELEASED", released: escrow.amount, releasedAt: now } });
+    // Partial refunds already came out of escrow; the store receives the rest.
+    const net = Math.max(0, escrow.amount - escrow.refunded);
+    const claimed = await tx.escrow.updateMany({ where: { id: escrow.id, status: "HELD" }, data: { status: "RELEASED", released: net, releasedAt: now } });
     if (claimed.count === 0) return false;
 
     const { subOrder } = escrow;
-    if (escrow.amount > 0) {
+    if (net > 0) {
       await postEntry(tx, {
         idempotencyKey: `escrow-release:${escrow.id}`,
         description: `Escrow released for sub-order ${subOrder.id} (${reason})`,
         occurredAt: now,
         metadata: { escrowId: escrow.id, subOrderId: subOrder.id, reason },
         lines: [
-          { account: accounts.escrow(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: escrow.amount },
-          { account: accounts.payable(subOrder.storeId, subOrder.currency), direction: "CREDIT", amount: escrow.amount },
+          { account: accounts.escrow(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: net },
+          { account: accounts.payable(subOrder.storeId, subOrder.currency), direction: "CREDIT", amount: net },
         ],
       });
     }
@@ -43,6 +45,8 @@ export async function releaseEscrowNow(escrowId: string, now: Date, reason: stri
       await tx.subOrder.update({ where: { id: subOrder.id }, data: { status: "COMPLETED", completedAt: now } });
       await tx.orderItem.updateMany({ where: { subOrderId: subOrder.id, status: { in: ["DELIVERED", "PENDING", "FULFILLING"] } }, data: { status: "COMPLETED", completedAt: now } });
     }
+    // Approved work, and delivered work the buyer never answered, is now paid.
+    await tx.milestone.updateMany({ where: { orderItem: { subOrderId: subOrder.id }, status: { in: ["SUBMITTED", "APPROVED"] } }, data: { status: "RELEASED", releasedAt: now } });
     await rollupOrderStatus(tx, subOrder.orderId);
     return true;
   });
@@ -78,11 +82,11 @@ export async function releaseEligibleEscrows(now: Date, limit = 200): Promise<nu
  */
 export async function transferPendingPayouts(stripe: Stripe, limit = 100): Promise<number> {
   const pending = await prisma.escrow.findMany({
-    where: { status: "RELEASED", stripeTransferId: null, amount: { gt: 0 }, subOrder: { store: { payoutsEnabled: true, stripeAccountId: { not: null } } } },
+    where: { status: "RELEASED", stripeTransferId: null, released: { gt: 0 }, subOrder: { store: { payoutsEnabled: true, stripeAccountId: { not: null } } } },
     take: limit,
     select: {
       id: true,
-      amount: true,
+      released: true,
       subOrder: {
         select: {
           id: true,
@@ -106,7 +110,7 @@ export async function transferPendingPayouts(stripe: Stripe, limit = 100): Promi
       const charge = await stripe.charges.retrieve(chargeId, { expand: ["balance_transaction"] });
       const balance = charge.balance_transaction;
       if (!balance || typeof balance === "string") throw new Error(`Charge ${chargeId} has no balance transaction yet`);
-      const amount = Math.floor((escrow.amount * balance.amount) / charge.amount);
+      const amount = Math.floor((escrow.released * balance.amount) / charge.amount);
       if (amount <= 0) continue;
 
       const transfer = await stripe.transfers.create(
@@ -130,8 +134,8 @@ export async function transferPendingPayouts(stripe: Stripe, limit = 100): Promi
           occurredAt: new Date(),
           metadata: { escrowId: escrow.id, transferId: transfer.id, settlementAmount: amount, settlementCurrency: balance.currency },
           lines: [
-            { account: accounts.payable(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: escrow.amount },
-            { account: accounts.cash(subOrder.currency), direction: "CREDIT", amount: escrow.amount },
+            { account: accounts.payable(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: escrow.released },
+            { account: accounts.cash(subOrder.currency), direction: "CREDIT", amount: escrow.released },
           ],
         });
       });
@@ -167,6 +171,8 @@ export async function confirmReceived(buyerId: string, subOrderId: string, now: 
   if (!["SHIPPED", "DELIVERED"].includes(subOrder.status)) throw new CheckoutError("You can confirm once the seller has shipped or delivered.");
   if (subOrder.disputes.length > 0) throw new CheckoutError("This order has an open dispute.");
   if (!subOrder.escrow || subOrder.escrow.status !== "HELD") throw new CheckoutError("Payment for this order has already been settled.");
+  const unfinishedWork = await prisma.orderItem.count({ where: { subOrderId: subOrder.id, listingType: "SERVICE", status: { in: ["PENDING", "FULFILLING"] } } });
+  if (unfinishedWork > 0) throw new CheckoutError("Part of this order is service work that is not delivered yet. Approve it in the workspace once it is.");
   await prisma.subOrder.update({ where: { id: subOrder.id }, data: { status: "DELIVERED", deliveredAt: now } });
   await releaseEscrowNow(subOrder.escrow.id, now, "buyer confirmed delivery");
 }

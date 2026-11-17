@@ -58,7 +58,18 @@ split orders, Stripe Connect escrow, double-entry ledger.
   after the hold period and transfers sellers' share (in the charge's settlement currency)
   to their connected accounts; chargebacks freeze escrow, won chargebacks unfreeze it;
   refund and payout webhooks.
-- [ ] Phase 7 — Fulfillment: carrier tracking/RMA, encrypted vault + license API, milestone workspace
+- [x] **Phase 7 — Fulfilment**: seller order desk (`/seller/studio/orders`) with To do /
+      Shipped / Returns / Completed tabs; physical orders: mark preparing, ship with carrier
+      and tracking link (EMS, DHL, FedEx, UPS, Aramex, local courier), tracking events,
+      delivered (starts the protection window), seller cancel with full refund and restock;
+      returns portal (buyer requests while escrow is held → escrow frozen → seller approves or
+      declines → buyer adds return tracking → seller refunds, optionally restocks); refund
+      engine that unwinds the ledger proportionally (store escrow, commission, platform-funded
+      promo) and revokes licences; licence activation API (`/api/licenses/activate`,
+      `/validate`, `/deactivate`) with per-device limits; service workspace
+      (`/orders/[id]/work/[itemId]`) with the buyer's brief (intake answers and files),
+      encrypted deliverable uploads, revision rounds within the package allowance, approval
+      that pays the seller, and auto-approval when the hold window ends.
 - [ ] Phase 8 — Socket.io messaging, notifications, dispute resolution center
 - [ ] Phase 9 — Flash sales, affiliates, verified reviews, seller analytics
 - [ ] Phase 10 — Super-admin command center
@@ -130,6 +141,38 @@ Additional webhook events: platform endpoint `charge.dispute.created`,
 `charge.dispute.closed`, `charge.refunded`; Connect endpoint `payout.created`,
 `payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
 
+## Fulfilment (Phase 7)
+
+Sub-order status follows its items: all delivered → `DELIVERED` (the escrow hold window
+restarts from that moment), all done → `COMPLETED`, service work in progress →
+`IN_PROGRESS`, physical items handed over → `SHIPPED`. The worker's `release-escrow` job
+pays out delivered sub-orders whose window ended with no open return or dispute.
+
+Refunds come out of escrow, so they are possible only while it is held or frozen; after
+release, recovery goes through disputes (Phase 8). A refund of `R` from a sub-order the
+buyer paid `P` for debits the store's escrow and the platform's commission and credits any
+platform-funded promotion in proportion, so a full refund exactly reverses the payment
+entry. Stripe refunds use idempotency keys per business event (`refund-rma:<id>`,
+`refund-seller-cancel:<subOrderId>`).
+
+Licence API for software vendors (JSON, 60 requests per minute per IP):
+
+```bash
+curl -X POST https://<domain>/api/licenses/activate \
+  -H 'Content-Type: application/json' \
+  -d '{"key":"ABCD-EFGH-JKLM-NPQR","fingerprint":"<stable device id>","deviceName":"Office PC"}'
+# 200 {"ok":true,"status":"ACTIVE","activationsUsed":1,"activationsLimit":3,...}
+# 404 NOT_FOUND · 403 REVOKED / EXPIRED / NOT_ACTIVATED · 409 LIMIT_REACHED · 429 RATE_LIMITED
+```
+
+`/api/licenses/validate` and `/api/licenses/deactivate` take `{ key, fingerprint }`.
+Re-activating a device that is already active does not use another slot; a refund revokes
+the key.
+
+Files attached to orders (deliverables, intake uploads) are encrypted in the vault under
+`attachments/<orderItemId>/`, up to 200 MB each, and only the buyer and seller of that item
+can download them.
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -159,7 +202,9 @@ Phase 5 ran 16 unit checks of the pricing engine (rounding, promo allocation, we
 and free shipping, tax on shipping, international blocking). Phase 6 checked ledger
 balancing rules, settlement for platform- and store-funded promos (every payment entry
 balances), licence key generation, and the download route end to end (encrypted vault →
-signed link → decrypted bytes match; expired and forged links refused).
+signed link → decrypted bytes match; expired and forged links refused). Phase 7 checked
+the refund split (full refunds unwind escrow, commission and promo exactly; partial refunds
+balance and never exceed escrow) and 12 sub-order status transitions.
 
 ## Needs owner input
 
@@ -176,6 +221,9 @@ signed link → decrypted bytes match; expired and forged links refused).
 - **Promo funding.** Default chosen: store codes are paid for by the store (the platform fee
   is charged on the discounted amount); platform-wide codes are paid for by the platform
   (sellers are paid as if no discount applied).
+- **Return window.** Default chosen: the escrow hold period (`escrow_hold_days`, 3 days after
+  delivery). Many marketplaces use 7–14 days for physical goods; a longer window delays seller
+  payouts by the same amount.
 - **KYC review** happens in the admin command center (Phase 10). Until then, submissions stay
   `PENDING` and stores stay in `PENDING_REVIEW`.
 

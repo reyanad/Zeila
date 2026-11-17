@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const LINKS = [
   { href: "/seller/studio", label: "Listings" },
+  { href: "/seller/studio/orders", label: "Orders" },
   { href: "/seller/studio/warehouses", label: "Warehouses" },
   { href: "/seller/studio/shipping", label: "Shipping" },
   { href: "/seller/onboarding", label: "Seller setup" },
