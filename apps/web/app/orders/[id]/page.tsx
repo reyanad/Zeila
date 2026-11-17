@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@marketplace/database";
 import { Alert, Badge, buttonVariants } from "@marketplace/ui";
 import { RETURN_REASONS, isReturnReason } from "@marketplace/shared-types";
+import { ContactSellerButton } from "@/components/messages/contact-seller-button";
 import { ConfirmReceivedButton } from "@/components/orders/confirm-received-button";
 import { PaymentPending } from "@/components/orders/payment-pending";
 import { ReturnRequestForm } from "@/components/orders/return-request-form";
@@ -46,7 +47,8 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
     include: {
       subOrders: {
         include: {
-          store: { select: { name: true, slug: true } },
+          store: { select: { id: true, name: true, slug: true } },
+          disputes: { where: { status: { in: ["OPEN", "AWAITING_SELLER", "AWAITING_BUYER", "UNDER_REVIEW"] } }, select: { id: true }, take: 1 },
           escrow: { select: { status: true, holdUntil: true, frozenReason: true } },
           shipments: { orderBy: { createdAt: "asc" }, select: { id: true, carrier: true, trackingNumber: true, trackingUrl: true, status: true, events: true } },
           items: {
@@ -194,6 +196,20 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
                   Payment held in escrow until {subOrder.escrow.holdUntil.toLocaleDateString("en-GB", { dateStyle: "medium" })} unless you confirm sooner.
                 </span>
                 <ConfirmReceivedButton orderId={order.id} subOrderId={subOrder.id} storeName={subOrder.store.name} />
+              </div>
+            ) : null}
+            {order.status !== "PENDING_PAYMENT" && order.status !== "CANCELLED" ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <ContactSellerButton storeId={subOrder.store.id} listingId={null} orderId={order.id} returnTo={`/orders/${order.id}`} />
+                {subOrder.disputes[0] ? (
+                  <Link href={`/disputes/${subOrder.disputes[0].id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>
+                    View your open case
+                  </Link>
+                ) : subOrder.escrow?.status === "HELD" || subOrder.escrow?.status === "FROZEN" ? (
+                  <Link href={`/disputes/new?subOrderId=${subOrder.id}`} className={buttonVariants({ size: "sm", variant: "ghost" })}>
+                    Report a problem
+                  </Link>
+                ) : null}
               </div>
             ) : null}
             {subOrder.escrow?.status === "FROZEN" ? (

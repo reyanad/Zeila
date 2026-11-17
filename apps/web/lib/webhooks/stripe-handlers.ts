@@ -1,7 +1,7 @@
 import "server-only";
 import type Stripe from "stripe";
 import { prisma } from "@marketplace/database";
-import { completeOrderPayment, freezeOrderEscrows, unfreezeOrderEscrows } from "@marketplace/core";
+import { closeChargeback, completeOrderPayment, recordChargeback } from "@marketplace/core";
 import { recordAudit } from "@/lib/audit";
 import { markAccountDisconnected, syncStripeAccount } from "@/lib/seller/stripe-account";
 
@@ -89,25 +89,29 @@ async function orderIdForCharge(chargeId: string): Promise<string | null> {
   return payment?.orderId ?? null;
 }
 
-/** A chargeback freezes the order's escrow so no money leaves before it is resolved. */
+/** A chargeback becomes a card dispute per sub-order and freezes its escrow until the bank decides. */
 async function onChargeDisputeCreated(event: Stripe.Event): Promise<void> {
   if (event.type !== "charge.dispute.created") return;
   const dispute = event.data.object;
   const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
   const orderId = await orderIdForCharge(chargeId);
   if (!orderId) return;
-  const frozen = await freezeOrderEscrows(orderId, `Chargeback ${dispute.id}: ${dispute.reason}`, new Date(event.created * 1000));
-  await recordAudit({ actorId: null, action: "chargeback.opened", entity: "Order", entityId: orderId, data: { disputeId: dispute.id, reason: dispute.reason, amount: dispute.amount, frozen } });
+  const dueBy = dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null;
+  const recorded = await recordChargeback(
+    { orderId, stripeDisputeId: dispute.id, reason: dispute.reason, amount: dispute.amount, currency: dispute.currency.toUpperCase(), evidenceDueBy: dueBy },
+    new Date(event.created * 1000),
+  );
+  await recordAudit({ actorId: null, action: "chargeback.opened", entity: "Order", entityId: orderId, data: { disputeId: dispute.id, reason: dispute.reason, amount: dispute.amount, subOrders: recorded } });
 }
 
-/** A won chargeback unfreezes escrow; a lost one stays frozen for the resolution center. */
+/** The bank's decision: won releases the hold; lost takes the money back out of escrow (or books a loss to recover). */
 async function onChargeDisputeClosed(event: Stripe.Event): Promise<void> {
   if (event.type !== "charge.dispute.closed") return;
   const dispute = event.data.object;
   const chargeId = typeof dispute.charge === "string" ? dispute.charge : dispute.charge.id;
   const orderId = await orderIdForCharge(chargeId);
   if (!orderId) return;
-  if (dispute.status === "won") await unfreezeOrderEscrows(orderId);
+  await closeChargeback({ stripeDisputeId: dispute.id, outcome: dispute.status, amount: dispute.amount }, new Date(event.created * 1000));
   await recordAudit({ actorId: null, action: `chargeback.${dispute.status}`, entity: "Order", entityId: orderId, data: { disputeId: dispute.id, amount: dispute.amount } });
 }
 
