@@ -1,4 +1,5 @@
 export * from "./access";
+export * from "./admin";
 export * from "./affiliates";
 export * from "./analytics";
 export * from "./cart";
