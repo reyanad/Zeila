@@ -2,6 +2,7 @@ import type Stripe from "stripe";
 import { prisma } from "@marketplace/database";
 import { fulfillPaidOrder } from "./fulfillment";
 import { commitReservations, releaseReservations } from "./inventory";
+import { displayAmount, notify } from "./notifications";
 import { getSetting } from "./settings";
 
 export type PaymentOutcome = "completed" | "already-paid" | "amount-mismatch" | "not-pending" | "missing";
@@ -24,7 +25,7 @@ export interface PaymentReceipt {
  */
 export async function completeOrderPayment(receipt: PaymentReceipt): Promise<PaymentOutcome> {
   const escrowHoldDays = await getSetting("escrowHoldDays");
-  return prisma.$transaction(
+  const outcome: PaymentOutcome = await prisma.$transaction(
     async (tx) => {
       const order = await tx.order.findUnique({
         where: { id: receipt.orderId },
@@ -68,6 +69,39 @@ export async function completeOrderPayment(receipt: PaymentReceipt): Promise<Pay
     },
     { timeout: 30_000 },
   );
+  if (outcome === "completed") await notifyOrderPaid(receipt.orderId);
+  return outcome;
+}
+
+async function notifyOrderPaid(orderId: string): Promise<void> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNumber: true,
+      buyerId: true,
+      grandTotal: true,
+      currency: true,
+      subOrders: { select: { id: true, grandTotal: true, store: { select: { sellerId: true } }, items: { select: { titleSnapshot: true, quantity: true } } } },
+    },
+  });
+  if (!order) return;
+  await notify([
+    {
+      userId: order.buyerId,
+      type: "ORDER_PAID",
+      title: `Payment confirmed for order ${order.orderNumber}`,
+      body: `${displayAmount(order.grandTotal, order.currency)} is held in escrow until your order is delivered.`,
+      href: `/orders/${order.id}`,
+    },
+    ...order.subOrders.map((subOrder) => ({
+      userId: subOrder.store.sellerId,
+      type: "ORDER_PLACED" as const,
+      title: `New order ${order.orderNumber}`,
+      body: `${subOrder.items.map((item) => `${item.quantity} × ${item.titleSnapshot}`).join(", ").slice(0, 300)} (${displayAmount(subOrder.grandTotal, order.currency)})`,
+      href: `/seller/studio/orders/${subOrder.id}`,
+    })),
+  ]);
 }
 
 /** Cancel an unpaid order: stock and promo usage are given back. */

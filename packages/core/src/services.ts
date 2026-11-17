@@ -3,6 +3,7 @@ import { intakeFieldSchema, type IntakeField } from "@marketplace/shared-types";
 import { orderItemForUser } from "./access";
 import { CheckoutError } from "./errors";
 import { releaseEscrowNow } from "./escrow";
+import { notifySubOrder } from "./notifications";
 import { rollupOrderStatus } from "./fulfillment";
 import { rollupSubOrderStatus } from "./status";
 
@@ -73,6 +74,7 @@ export async function saveIntakeAnswers(buyerId: string, orderItemId: string, an
     create: { intakeFormId: form.id, orderItemId: item.id, buyerId, answers: stored },
     update: { answers: stored, submittedAt: new Date() },
   });
+  await notifySubOrder(item.subOrderId, "seller", { type: "SYSTEM", title: "Brief received for order {order}", body: `The buyer answered your questions for ${item.titleSnapshot}.` });
 }
 
 export async function startWork(sellerUserId: string, orderItemId: string, now: Date): Promise<void> {
@@ -107,6 +109,12 @@ export async function submitDelivery(sellerUserId: string, orderItemId: string, 
     await rollupSubOrderStatus(tx, item.subOrderId, now);
     await rollupOrderStatus(tx, item.subOrder.orderId);
   });
+  await notifySubOrder(item.subOrderId, "buyer", {
+    type: "MILESTONE_SUBMITTED",
+    title: "{store} delivered your work",
+    body: `Review ${item.titleSnapshot}: approve it or ask for changes.`,
+    href: `/orders/${item.subOrder.orderId}/work/${item.id}`,
+  });
 }
 
 export async function requestRevision(buyerId: string, orderItemId: string, note: string, now: Date): Promise<void> {
@@ -126,6 +134,7 @@ export async function requestRevision(buyerId: string, orderItemId: string, note
     await tx.subOrder.updateMany({ where: { id: item.subOrderId, status: "DELIVERED" }, data: { status: "IN_PROGRESS" } });
     await rollupOrderStatus(tx, item.subOrder.orderId);
   });
+  await notifySubOrder(item.subOrderId, "seller", { type: "REVISION_REQUESTED", title: "Changes requested on order {order}", body: trimmed.slice(0, 300) });
 }
 
 /** Buyer accepts the work. When nothing else in the sub-order is pending, the seller is paid now. */
@@ -139,6 +148,7 @@ export async function approveDelivery(buyerId: string, orderItemId: string, now:
     await rollupOrderStatus(tx, item.subOrder.orderId);
     return status;
   });
+  await notifySubOrder(item.subOrderId, "seller", { type: "MILESTONE_APPROVED", title: "The buyer approved your work on order {order}", body: item.titleSnapshot });
   if (subOrderStatus === "COMPLETED") {
     const escrow = await prisma.escrow.findUnique({ where: { subOrderId: item.subOrderId }, select: { id: true } });
     if (escrow) await releaseEscrowNow(escrow.id, now, "buyer approved the work");

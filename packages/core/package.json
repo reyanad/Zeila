@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@marketplace/database": "*",
+    "@marketplace/jobs": "*",
+    "@marketplace/realtime": "*",
     "@marketplace/shared-types": "*",
     "stripe": "23.1.0",
     "zod": "4.6.7"

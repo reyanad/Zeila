@@ -3,6 +3,7 @@ import { prisma, type Prisma } from "@marketplace/database";
 import { CheckoutError } from "./errors";
 import { rollupOrderStatus, settleSubOrder } from "./fulfillment";
 import { accounts, postEntry } from "./ledger";
+import { displayAmount, notifySubOrder } from "./notifications";
 import { rollupSubOrderStatus } from "./status";
 
 /**
@@ -40,6 +41,11 @@ export interface RefundRequest {
   refundedItemIds: string[];
   /** Units to put back on the shelf, per order item. */
   restock: Array<{ orderItemId: string; quantity: number }>;
+  /**
+   * The money already went back to the buyer outside our refund call (a lost
+   * chargeback): record it without asking Stripe for a refund.
+   */
+  external?: boolean;
 }
 
 function promoFunding(metadata: Prisma.JsonValue): "store" | "platform" | null {
@@ -82,7 +88,7 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
   const payment = subOrder.order.payments[0];
 
   let stripeRefund: Stripe.Refund | null = null;
-  if (request.amount > 0) {
+  if (request.amount > 0 && !request.external) {
     if (!payment) throw new CheckoutError("No captured payment was found for this order.");
     if (!stripe) throw new CheckoutError("Refunds need Stripe, which is not configured.");
     stripeRefund = await stripe.refunds.create(
@@ -146,4 +152,11 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
     else await rollupSubOrderStatus(tx, subOrder.id, now);
     await rollupOrderStatus(tx, subOrder.orderId);
   });
+  if (request.amount > 0 && !request.external) {
+    await notifySubOrder(subOrder.id, "buyer", {
+      type: "REFUND_ISSUED",
+      title: "Refund issued for order {order}",
+      body: `${displayAmount(request.amount, subOrder.currency)} is on its way back to your payment method. Banks usually show it within 5–10 days.`,
+    });
+  }
 }
