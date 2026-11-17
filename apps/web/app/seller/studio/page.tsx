@@ -3,7 +3,7 @@ import Link from "next/link";
 import { prisma } from "@marketplace/database";
 import { formatMoney, type CurrencyCode } from "@marketplace/shared-types";
 import { Alert, Badge, buttonVariants } from "@marketplace/ui";
-import { STATUS_BADGE } from "@/components/studio/listing-builder";
+import { STATUS_BADGE } from "@/components/studio/status-badge";
 import { ListingRowActions } from "@/components/studio/listing-row-actions";
 import { requireStudio } from "@/lib/studio/context";
 

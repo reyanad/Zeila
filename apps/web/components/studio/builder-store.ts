@@ -1,5 +1,3 @@
-"use client";
-
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   minorToInput,

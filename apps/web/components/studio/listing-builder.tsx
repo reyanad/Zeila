@@ -1,5 +1,6 @@
 "use client";
 
+import { STATUS_BADGE, type ListingStatusValue } from "./status-badge";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { fieldErrors, listingInputSchema, type ListingTypeValue } from "@marketplace/shared-types";
@@ -12,16 +13,9 @@ import { ImagesEditor } from "./images-editor";
 import { PhysicalEditor } from "./physical-editor";
 import { ServiceEditor } from "./service-editor";
 
-export type ListingStatusValue = "DRAFT" | "PENDING_REVIEW" | "ACTIVE" | "PAUSED" | "REJECTED" | "ARCHIVED";
+export type { ListingStatusValue } from "./status-badge";
 
-export const STATUS_BADGE: Record<ListingStatusValue, { tone: BadgeTone; label: string }> = {
-  DRAFT: { tone: "neutral", label: "Draft" },
-  PENDING_REVIEW: { tone: "info", label: "In review" },
-  ACTIVE: { tone: "success", label: "Live" },
-  PAUSED: { tone: "warning", label: "Paused" },
-  REJECTED: { tone: "danger", label: "Rejected" },
-  ARCHIVED: { tone: "neutral", label: "Archived" },
-};
+export { STATUS_BADGE } from "./status-badge";
 
 const TYPE_TITLES: Record<ListingTypeValue, string> = {
   PHYSICAL: "Product details",
