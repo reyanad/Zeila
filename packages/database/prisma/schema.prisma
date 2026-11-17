@@ -279,6 +279,12 @@ enum FraudFlagStatus {
   DISMISSED
 }
 
+enum ReservationStatus {
+  HELD
+  COMMITTED
+  RELEASED
+}
+
 enum WebhookEventStatus {
   RECEIVED
   PROCESSED
@@ -291,54 +297,54 @@ enum WebhookEventStatus {
 // ============================================================================
 
 model User {
-  id             String    @id @default(cuid())
-  email          String    @unique
-  emailVerified  DateTime?
-  hashedPassword String?
-  name           String?
-  image          String?
-  role           UserRole  @default(BUYER)
-  phone          String?
-  country        String? // ISO-3166 alpha-2
-  defaultCurrency String   @default("USD")
-  twoFactorEnabled Boolean @default(false)
+  id               String    @id @default(cuid())
+  email            String    @unique
+  emailVerified    DateTime?
+  hashedPassword   String?
+  name             String?
+  image            String?
+  role             UserRole  @default(BUYER)
+  phone            String?
+  country          String? // ISO-3166 alpha-2
+  defaultCurrency  String    @default("USD")
+  twoFactorEnabled Boolean   @default(false)
   twoFactorSecret  String? // AES-256-GCM ciphertext of the base32 TOTP secret
   // Bumped on password change/reset and "sign out everywhere"; JWT sessions
   // carrying an older value are rejected.
-  sessionVersion Int       @default(0)
-  isSuspended    Boolean   @default(false)
-  suspendedReason String?
-  lastLoginAt    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  sessionVersion   Int       @default(0)
+  isSuspended      Boolean   @default(false)
+  suspendedReason  String?
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  accounts            OauthAccount[]
-  sessions            Session[]
-  recoveryCodes       TwoFactorRecoveryCode[]
-  kycSubmissions      KycSubmission[]
-  kycReviews          KycSubmission[]       @relation("KycReviewer")
-  store               Store?
-  addresses           Address[]
-  carts               Cart[]
-  orders              Order[]
-  intakeResponses     IntakeFormResponse[]
-  licenseKeys         LicenseKey[]
-  rmaRequests         RmaRequest[]
-  disputesOpened      Dispute[]             @relation("DisputeOpener")
-  disputesResolved    Dispute[]             @relation("DisputeResolver")
-  conversations       ConversationParticipant[]
-  messages            Message[]
-  reviewsWritten      Review[]              @relation("ReviewAuthor")
-  reviewsReceived     Review[]              @relation("ReviewSubject")
-  affiliate           Affiliate?
-  referredBy          Referral[]            @relation("ReferredUser")
-  notifications       Notification[]
-  auditLogs           AuditLog[]
-  fraudFlagsRaised    FraudFlag[]           @relation("FraudFlagReporter")
-  fraudFlagsAgainst   FraudFlag[]           @relation("FraudFlagSubject")
-  ledgerAccounts      LedgerAccount[]
-  moderatedListings   Listing[]             @relation("ListingModerator")
-  milestonesApproved  Milestone[]           @relation("MilestoneApprover")
+  accounts           OauthAccount[]
+  sessions           Session[]
+  recoveryCodes      TwoFactorRecoveryCode[]
+  kycSubmissions     KycSubmission[]
+  kycReviews         KycSubmission[]           @relation("KycReviewer")
+  store              Store?
+  addresses          Address[]
+  carts              Cart[]
+  orders             Order[]
+  intakeResponses    IntakeFormResponse[]
+  licenseKeys        LicenseKey[]
+  rmaRequests        RmaRequest[]
+  disputesOpened     Dispute[]                 @relation("DisputeOpener")
+  disputesResolved   Dispute[]                 @relation("DisputeResolver")
+  conversations      ConversationParticipant[]
+  messages           Message[]
+  reviewsWritten     Review[]                  @relation("ReviewAuthor")
+  reviewsReceived    Review[]                  @relation("ReviewSubject")
+  affiliate          Affiliate?
+  referredBy         Referral[]                @relation("ReferredUser")
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  fraudFlagsRaised   FraudFlag[]               @relation("FraudFlagReporter")
+  fraudFlagsAgainst  FraudFlag[]               @relation("FraudFlagSubject")
+  ledgerAccounts     LedgerAccount[]
+  moderatedListings  Listing[]                 @relation("ListingModerator")
+  milestonesApproved Milestone[]               @relation("MilestoneApprover")
 
   @@index([role])
   @@index([createdAt])
@@ -400,21 +406,21 @@ model TwoFactorRecoveryCode {
 }
 
 model KycSubmission {
-  id          String    @id @default(cuid())
-  userId      String
-  status      KycStatus @default(PENDING)
-  legalName   String
-  birthDate   DateTime?
-  country     String
-  idType      String // passport | national_id | driver_license
-  idNumber    String // AES-256-GCM ciphertext; decrypt only for KYC reviewers
-  documents   Json // [{kind, storageKey, fileName, contentType, size}] (objects are encrypted in the vault bucket)
-  notes       String?
-  reviewedById String?
-  reviewedAt  DateTime?
+  id              String    @id @default(cuid())
+  userId          String
+  status          KycStatus @default(PENDING)
+  legalName       String
+  birthDate       DateTime?
+  country         String
+  idType          String // passport | national_id | driver_license
+  idNumber        String // AES-256-GCM ciphertext; decrypt only for KYC reviewers
+  documents       Json // [{kind, storageKey, fileName, contentType, size}] (objects are encrypted in the vault bucket)
+  notes           String?
+  reviewedById    String?
+  reviewedAt      DateTime?
   rejectionReason String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   user       User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   reviewedBy User? @relation("KycReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
@@ -424,23 +430,23 @@ model KycSubmission {
 }
 
 model Address {
-  id          String  @id @default(cuid())
-  userId      String
-  label       String? // "Home", "Office"
-  recipient   String
-  phone       String?
-  line1       String
-  line2       String?
-  city        String
-  state       String?
-  postalCode  String?
-  country     String // ISO-3166 alpha-2
-  isDefaultShipping Boolean @default(false)
-  isDefaultBilling  Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(cuid())
+  userId            String
+  label             String? // "Home", "Office"
+  recipient         String
+  phone             String?
+  line1             String
+  line2             String?
+  city              String
+  state             String?
+  postalCode        String?
+  country           String // ISO-3166 alpha-2
+  isDefaultShipping Boolean  @default(false)
+  isDefaultBilling  Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   subOrdersShipping SubOrder[] @relation("ShippingAddress")
 
   @@index([userId])
@@ -451,51 +457,54 @@ model Address {
 // ============================================================================
 
 model Store {
-  id          String      @id @default(cuid())
-  sellerId    String      @unique
-  slug        String      @unique
-  name        String
-  tagline     String?
-  description String?
-  logoKey     String?
-  bannerKey   String?
-  status      StoreStatus @default(DRAFT)
-  country     String
-  currency    String      @default("USD")
+  id                    String                 @id @default(cuid())
+  sellerId              String                 @unique
+  slug                  String                 @unique
+  name                  String
+  tagline               String?
+  description           String?
+  logoKey               String?
+  bannerKey             String?
+  status                StoreStatus            @default(DRAFT)
+  country               String
+  currency              String                 @default("USD")
   commissionBpsOverride Int? // overrides PLATFORM_FEE_BPS when set
-  stripeAccountId String? @unique
-  stripeOnboarding StripeOnboardingStatus @default(NOT_STARTED)
-  payoutsEnabled  Boolean @default(false)
-  chargesEnabled  Boolean @default(false)
-  vacationMode    Boolean @default(false)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  stripeAccountId       String?                @unique
+  stripeOnboarding      StripeOnboardingStatus @default(NOT_STARTED)
+  payoutsEnabled        Boolean                @default(false)
+  chargesEnabled        Boolean                @default(false)
+  vacationMode          Boolean                @default(false)
+  // {domestic:{base,perKg}, international:{base,perKg}|null, freeOverDomestic, handlingDays}
+  // in the store currency (minor units); validated by shippingProfileSchema.
+  shippingProfile       Json?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
 
-  seller     User        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  warehouses Warehouse[]
-  listings   Listing[]
-  subOrders  SubOrder[]
-  payouts    Payout[]
-  promoCodes PromoCode[]
+  seller         User            @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  warehouses     Warehouse[]
+  listings       Listing[]
+  subOrders      SubOrder[]
+  payouts        Payout[]
+  promoCodes     PromoCode[]
   ledgerAccounts LedgerAccount[]
-  fraudFlags FraudFlag[] @relation("FraudFlagStore")
+  fraudFlags     FraudFlag[]     @relation("FraudFlagStore")
 
   @@index([status])
 }
 
 model Warehouse {
-  id        String   @id @default(cuid())
-  storeId   String
-  name      String
-  line1     String
-  line2     String?
-  city      String
-  state     String?
+  id         String   @id @default(cuid())
+  storeId    String
+  name       String
+  line1      String
+  line2      String?
+  city       String
+  state      String?
   postalCode String?
-  country   String
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  country    String
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   store     Store            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   inventory InventoryLevel[]
@@ -504,16 +513,17 @@ model Warehouse {
 }
 
 model InventoryLevel {
-  id          String @id @default(cuid())
+  id          String   @id @default(cuid())
   warehouseId String
   skuId       String
-  onHand      Int    @default(0)
-  reserved    Int    @default(0) // held for paid-but-unshipped orders
-  safetyStock Int    @default(0)
+  onHand      Int      @default(0)
+  reserved    Int      @default(0) // held for paid-but-unshipped orders
+  safetyStock Int      @default(0)
   updatedAt   DateTime @updatedAt
 
-  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
-  sku       Sku       @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  warehouse    Warehouse              @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  sku          Sku                    @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  reservations InventoryReservation[]
 
   @@unique([warehouseId, skuId])
   @@index([skuId])
@@ -524,14 +534,14 @@ model InventoryLevel {
 // ============================================================================
 
 model Category {
-  id        String  @id @default(cuid())
-  parentId  String?
-  name      String
-  slug      String  @unique
-  path      String // materialized path, e.g. "electronics/phones"
-  iconKey   String?
-  position  Int     @default(0)
-  isActive  Boolean @default(true)
+  id       String  @id @default(cuid())
+  parentId String?
+  name     String
+  slug     String  @unique
+  path     String // materialized path, e.g. "electronics/phones"
+  iconKey  String?
+  position Int     @default(0)
+  isActive Boolean @default(true)
 
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children Category[] @relation("CategoryTree")
@@ -542,35 +552,35 @@ model Category {
 }
 
 model Listing {
-  id          String        @id @default(cuid())
-  storeId     String
-  categoryId  String?
-  type        ListingType
-  status      ListingStatus @default(DRAFT)
-  title       String
-  slug        String        @unique
-  summary     String?
-  description String // markdown
-  images      Json          @default("[]") // [{key, alt, position}]
-  attributes  Json          @default("{}") // category-specific key/values
-  tags        String[]      @default([])
-  currency    String        @default("USD")
+  id             String                       @id @default(cuid())
+  storeId        String
+  categoryId     String?
+  type           ListingType
+  status         ListingStatus                @default(DRAFT)
+  title          String
+  slug           String                       @unique
+  summary        String?
+  description    String // markdown
+  images         Json                         @default("[]") // [{key, alt, position}]
+  attributes     Json                         @default("{}") // category-specific key/values
+  tags           String[]                     @default([])
+  currency       String                       @default("USD")
   // denormalized price range for cards/search (minor units)
-  minPrice    Int           @default(0)
-  maxPrice    Int           @default(0)
-  ratingAvg   Decimal       @default(0) @db.Decimal(3, 2)
-  ratingCount Int           @default(0)
-  salesCount  Int           @default(0)
-  viewCount   Int           @default(0)
-  moderatedById String?
+  minPrice       Int                          @default(0)
+  maxPrice       Int                          @default(0)
+  ratingAvg      Decimal                      @default(0) @db.Decimal(3, 2)
+  ratingCount    Int                          @default(0)
+  salesCount     Int                          @default(0)
+  viewCount      Int                          @default(0)
+  moderatedById  String?
   moderationNote String?
-  publishedAt DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  embedding   Unsupported("vector(1536)")?
+  publishedAt    DateTime?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  embedding      Unsupported("vector(1536)")?
   // SHA-256 of the text last embedded; the worker skips unchanged listings.
-  embeddingHash String?
-  embeddedAt    DateTime?
+  embeddingHash  String?
+  embeddedAt     DateTime?
 
   store        Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
   category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -593,11 +603,11 @@ model Listing {
 // --- Physical -----------------------------------------------------
 
 model Sku {
-  id             String  @id @default(cuid())
+  id             String   @id @default(cuid())
   listingId      String
   skuCode        String
   // variant axis values, e.g. {"color":"Black","size":"XL"}
-  variantValues  Json    @default("{}")
+  variantValues  Json     @default("{}")
   price          Int // minor units
   compareAtPrice Int?
   costPrice      Int?
@@ -606,7 +616,7 @@ model Sku {
   lengthMm       Int?
   widthMm        Int?
   heightMm       Int?
-  isActive       Boolean @default(true)
+  isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -634,38 +644,38 @@ model WholesaleTier {
 // --- Digital ------------------------------------------------------
 
 model DigitalAsset {
-  id          String  @id @default(cuid())
-  listingId   String  @unique
-  price       Int // minor units
-  vaultKey    String // encrypted object key in R2/S3 vault bucket
-  fileName    String
-  sizeBytes   BigInt
-  checksumSha256 String
-  version     String  @default("1.0.0")
-  changelog   String?
-  licenseTemplate String? // e.g. "MPLACE-{{BLOCK4}}-{{BLOCK4}}-{{BLOCK4}}"
-  activationsLimit Int  @default(3)
+  id               String   @id @default(cuid())
+  listingId        String   @unique
+  price            Int // minor units
+  vaultKey         String // encrypted object key in R2/S3 vault bucket
+  fileName         String
+  sizeBytes        BigInt
+  checksumSha256   String
+  version          String   @default("1.0.0")
+  changelog        String?
+  licenseTemplate  String? // e.g. "MPLACE-{{BLOCK4}}-{{BLOCK4}}-{{BLOCK4}}"
+  activationsLimit Int      @default(3)
   downloadLimit    Int? // null = unlimited while entitled
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  listing  Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  licenses LicenseKey[]
+  listing   Listing         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  licenses  LicenseKey[]
   downloads DownloadGrant[]
 }
 
 model LicenseKey {
-  id             String        @id @default(cuid())
-  digitalAssetId String
-  orderItemId    String?       @unique
-  ownerId        String
-  key            String        @unique
-  status         LicenseStatus @default(INACTIVE)
+  id               String        @id @default(cuid())
+  digitalAssetId   String
+  orderItemId      String?       @unique
+  ownerId          String
+  key              String        @unique
+  status           LicenseStatus @default(INACTIVE)
   activationsLimit Int
-  expiresAt      DateTime?
-  issuedAt       DateTime      @default(now())
-  revokedAt      DateTime?
-  revokedReason  String?
+  expiresAt        DateTime?
+  issuedAt         DateTime      @default(now())
+  revokedAt        DateTime?
+  revokedReason    String?
 
   digitalAsset DigitalAsset        @relation(fields: [digitalAssetId], references: [id], onDelete: Cascade)
   owner        User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
@@ -677,14 +687,14 @@ model LicenseKey {
 }
 
 model LicenseActivation {
-  id           String   @id @default(cuid())
-  licenseKeyId String
+  id                String    @id @default(cuid())
+  licenseKeyId      String
   deviceFingerprint String
-  deviceName   String?
-  ipAddress    String?
-  activatedAt  DateTime @default(now())
-  lastSeenAt   DateTime @default(now())
-  deactivatedAt DateTime?
+  deviceName        String?
+  ipAddress         String?
+  activatedAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  deactivatedAt     DateTime?
 
   licenseKey LicenseKey @relation(fields: [licenseKeyId], references: [id], onDelete: Cascade)
 
@@ -692,12 +702,12 @@ model LicenseActivation {
 }
 
 model DownloadGrant {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   digitalAssetId String
   orderItemId    String
-  downloadsUsed  Int      @default(0)
+  downloadsUsed  Int       @default(0)
   lastDownloadAt DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   digitalAsset DigitalAsset @relation(fields: [digitalAssetId], references: [id], onDelete: Cascade)
   orderItem    OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
@@ -761,6 +771,7 @@ model Cart {
   anonToken String?    @unique // cookie token for guest carts
   status    CartStatus @default(ACTIVE)
   currency  String     @default("USD")
+  promoCode String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
@@ -771,15 +782,15 @@ model Cart {
 }
 
 model CartItem {
-  id            String  @id @default(cuid())
-  cartId        String
-  listingId     String
-  skuId         String? // physical
-  serviceTierId String? // service
-  quantity      Int     @default(1)
+  id                String   @id @default(cuid())
+  cartId            String
+  listingId         String
+  skuId             String? // physical
+  serviceTierId     String? // service
+  quantity          Int      @default(1)
   // snapshot of unit price at add-to-cart time; re-verified at checkout
   unitPriceSnapshot Int
-  addedAt       DateTime @default(now())
+  addedAt           DateTime @default(now())
 
   cart        Cart         @relation(fields: [cartId], references: [id], onDelete: Cascade)
   listing     Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
@@ -791,20 +802,22 @@ model CartItem {
 }
 
 model PromoCode {
-  id         String    @id @default(cuid())
-  code       String    @unique
-  storeId    String? // null = platform-wide
-  type       PromoType
-  value      Int // percent (bps when PERCENT, e.g. 1000 = 10%) or fixed minor units
-  minSubtotal Int      @default(0)
-  usageLimit Int?
-  perUserLimit Int     @default(1)
-  startsAt   DateTime  @default(now())
-  expiresAt  DateTime?
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
+  id           String    @id @default(cuid())
+  code         String    @unique
+  storeId      String? // null = platform-wide
+  type         PromoType
+  value        Int // percent (bps when PERCENT, e.g. 1000 = 10%) or fixed minor units
+  // Currency of FIXED values and of minSubtotal; null for PERCENT codes valid in any currency.
+  currency     String?
+  minSubtotal  Int       @default(0)
+  usageLimit   Int?
+  perUserLimit Int       @default(1)
+  startsAt     DateTime  @default(now())
+  expiresAt    DateTime?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
 
-  store       Store?           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  store       Store?            @relation(fields: [storeId], references: [id], onDelete: Cascade)
   redemptions PromoRedemption[]
 
   @@index([storeId, isActive])
@@ -830,107 +843,114 @@ model PromoRedemption {
 // ============================================================================
 
 model Order {
-  id          String      @id @default(cuid())
-  orderNumber String      @unique // human-readable, e.g. MP-2026-000123
-  buyerId     String
-  currency    String
-  itemsSubtotal Int
-  shippingTotal Int       @default(0)
-  taxTotal    Int         @default(0)
-  discountTotal Int       @default(0)
-  grandTotal  Int
-  status      OrderStatus @default(PENDING_PAYMENT)
-  placedAt    DateTime    @default(now())
-  paidAt      DateTime?
-  completedAt DateTime?
-  cancelledAt DateTime?
-  metadata    Json        @default("{}")
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique // human-readable, e.g. MP-2026-000123
+  buyerId         String
+  currency        String
+  itemsSubtotal   Int
+  shippingTotal   Int         @default(0)
+  taxTotal        Int         @default(0)
+  discountTotal   Int         @default(0)
+  grandTotal      Int
+  status          OrderStatus @default(PENDING_PAYMENT)
+  // Delivery address as entered at checkout (immutable copy).
+  shippingAddress Json?
+  promoCode       String?
+  // Unpaid orders past this time are cancelled and their stock released.
+  expiresAt       DateTime?
+  placedAt        DateTime    @default(now())
+  paidAt          DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+  metadata        Json        @default("{}")
 
-  buyer       User             @relation(fields: [buyerId], references: [id], onDelete: Restrict)
-  subOrders   SubOrder[]
-  payments    Payment[]
+  buyer            User              @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  subOrders        SubOrder[]
+  payments         Payment[]
   promoRedemptions PromoRedemption[]
-  referrals   Referral[]
+  referrals        Referral[]
 
   @@index([buyerId, placedAt])
   @@index([status])
+  @@index([status, expiresAt])
 }
 
 model SubOrder {
-  id        String         @id @default(cuid())
-  orderId   String
-  storeId   String
-  status    SubOrderStatus @default(PENDING_PAYMENT)
-  currency  String
-  itemsSubtotal Int
-  shippingTotal Int        @default(0)
-  taxTotal  Int            @default(0)
-  discountTotal Int        @default(0)
-  grandTotal Int
-  platformFee Int          @default(0) // commission kept by platform
+  id                String         @id @default(cuid())
+  orderId           String
+  storeId           String
+  status            SubOrderStatus @default(PENDING_PAYMENT)
+  currency          String
+  itemsSubtotal     Int
+  shippingTotal     Int            @default(0)
+  taxTotal          Int            @default(0)
+  discountTotal     Int            @default(0)
+  grandTotal        Int
+  platformFee       Int            @default(0) // commission kept by platform
   shippingAddressId String?
-  shippedAt DateTime?
-  deliveredAt DateTime?
-  completedAt DateTime?
-  cancelledAt DateTime?
+  shippedAt         DateTime?
+  deliveredAt       DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
 
-  order     Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  store     Store      @relation(fields: [storeId], references: [id], onDelete: Restrict)
-  shippingAddress Address? @relation("ShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
-  items     OrderItem[]
-  shipments Shipment[]
-  escrow    Escrow?
-  disputes  Dispute[]
+  order           Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  store           Store       @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  shippingAddress Address?    @relation("ShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  items           OrderItem[]
+  shipments       Shipment[]
+  escrow          Escrow?
+  disputes        Dispute[]
 
   @@index([orderId])
   @@index([storeId, status])
 }
 
 model OrderItem {
-  id            String          @id @default(cuid())
-  subOrderId    String
-  listingId     String
-  listingType   ListingType
-  skuId         String?
-  serviceTierId String?
-  titleSnapshot String // title at purchase time
-  variantSnapshot Json          @default("{}")
-  quantity      Int             @default(1)
-  unitPrice     Int
-  lineTotal     Int
-  status        OrderItemStatus @default(PENDING)
-  deliveredAt   DateTime?
-  completedAt   DateTime?
+  id              String          @id @default(cuid())
+  subOrderId      String
+  listingId       String
+  listingType     ListingType
+  skuId           String?
+  serviceTierId   String?
+  titleSnapshot   String // title at purchase time
+  variantSnapshot Json            @default("{}")
+  quantity        Int             @default(1)
+  unitPrice       Int
+  lineTotal       Int
+  status          OrderItemStatus @default(PENDING)
+  deliveredAt     DateTime?
+  completedAt     DateTime?
 
-  subOrder    SubOrder     @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
-  listing     Listing      @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  sku         Sku?         @relation(fields: [skuId], references: [id], onDelete: Restrict)
-  serviceTier ServiceTier? @relation(fields: [serviceTierId], references: [id], onDelete: Restrict)
-  milestones  Milestone[]
-  revisions   Revision[]
-  deliverables Deliverable[]
-  licenseKey  LicenseKey?
+  subOrder       SubOrder               @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
+  listing        Listing                @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  sku            Sku?                   @relation(fields: [skuId], references: [id], onDelete: Restrict)
+  serviceTier    ServiceTier?           @relation(fields: [serviceTierId], references: [id], onDelete: Restrict)
+  milestones     Milestone[]
+  revisions      Revision[]
+  deliverables   Deliverable[]
+  licenseKey     LicenseKey?
   downloadGrants DownloadGrant[]
   intakeResponse IntakeFormResponse?
-  rmaRequests RmaRequest[]
-  reviews     Review[]
-  disputes    Dispute[]
+  rmaRequests    RmaRequest[]
+  reviews        Review[]
+  disputes       Dispute[]
+  reservations   InventoryReservation[]
 
   @@index([subOrderId])
   @@index([listingId])
 }
 
 model Payment {
-  id       String        @id @default(cuid())
-  orderId  String
-  stripePaymentIntentId String @unique
-  stripeChargeId String?
-  amount   Int
-  currency String
-  status   PaymentStatus @default(PROCESSING)
-  failureReason String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id                    String        @id @default(cuid())
+  orderId               String
+  stripePaymentIntentId String        @unique
+  stripeChargeId        String?
+  amount                Int
+  currency              String
+  status                PaymentStatus @default(PROCESSING)
+  failureReason         String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
   refunds Refund[]
@@ -939,12 +959,12 @@ model Payment {
 }
 
 model Refund {
-  id        String   @id @default(cuid())
-  paymentId String
-  stripeRefundId String @unique
-  amount    Int
-  reason    String?
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  paymentId      String
+  stripeRefundId String   @unique
+  amount         Int
+  reason         String?
+  createdAt      DateTime @default(now())
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
@@ -952,17 +972,17 @@ model Refund {
 }
 
 model Escrow {
-  id         String       @id @default(cuid())
-  subOrderId String       @unique
-  amount     Int // gross held for the seller (before platform fee)
-  released   Int          @default(0)
-  refunded   Int          @default(0)
-  status     EscrowStatus @default(HELD)
-  holdUntil  DateTime // auto-release eligibility time
-  releasedAt DateTime?
-  stripeTransferId String? @unique
-  frozenAt   DateTime?
-  frozenReason String?
+  id               String       @id @default(cuid())
+  subOrderId       String       @unique
+  amount           Int // gross held for the seller (before platform fee)
+  released         Int          @default(0)
+  refunded         Int          @default(0)
+  status           EscrowStatus @default(HELD)
+  holdUntil        DateTime // auto-release eligibility time
+  releasedAt       DateTime?
+  stripeTransferId String?      @unique
+  frozenAt         DateTime?
+  frozenReason     String?
 
   subOrder SubOrder @relation(fields: [subOrderId], references: [id], onDelete: Restrict)
 
@@ -972,21 +992,21 @@ model Escrow {
 // --- Service fulfillment -----------------------------------------
 
 model Milestone {
-  id          String          @id @default(cuid())
-  orderItemId String
-  position    Int
-  title       String
-  description String?
-  amount      Int // minor units; sum of milestones == line total
-  dueAt       DateTime?
-  status      MilestoneStatus @default(PENDING)
-  submittedAt DateTime?
-  approvedAt  DateTime?
+  id           String          @id @default(cuid())
+  orderItemId  String
+  position     Int
+  title        String
+  description  String?
+  amount       Int // minor units; sum of milestones == line total
+  dueAt        DateTime?
+  status       MilestoneStatus @default(PENDING)
+  submittedAt  DateTime?
+  approvedAt   DateTime?
   approvedById String?
-  releasedAt  DateTime?
+  releasedAt   DateTime?
 
-  orderItem  OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  approvedBy User?         @relation("MilestoneApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  orderItem    OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  approvedBy   User?         @relation("MilestoneApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   deliverables Deliverable[]
 
   @@unique([orderItemId, position])
@@ -1007,12 +1027,12 @@ model Revision {
 }
 
 model Deliverable {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   orderItemId String
   milestoneId String?
   message     String?
-  files       Json     @default("[]") // [{key, fileName, sizeBytes}]
-  submittedAt DateTime @default(now())
+  files       Json      @default("[]") // [{key, fileName, sizeBytes}]
+  submittedAt DateTime  @default(now())
   acceptedAt  DateTime?
 
   orderItem OrderItem  @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
@@ -1024,18 +1044,18 @@ model Deliverable {
 // --- Physical fulfillment ----------------------------------------
 
 model Shipment {
-  id         String         @id @default(cuid())
-  subOrderId String
-  carrier    String // e.g. DHL, EMS, local courier
-  service    String?
+  id             String         @id @default(cuid())
+  subOrderId     String
+  carrier        String // e.g. DHL, EMS, local courier
+  service        String?
   trackingNumber String?
-  trackingUrl String?
-  status     ShipmentStatus @default(LABEL_CREATED)
-  events     Json           @default("[]") // [{at, status, location, note}]
-  shippedAt  DateTime?
-  deliveredAt DateTime?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  trackingUrl    String?
+  status         ShipmentStatus @default(LABEL_CREATED)
+  events         Json           @default("[]") // [{at, status, location, note}]
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   subOrder SubOrder @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
 
@@ -1044,19 +1064,19 @@ model Shipment {
 }
 
 model RmaRequest {
-  id          String        @id @default(cuid())
-  orderItemId String
-  requesterId String
-  reason      String
-  details     String?
-  photos      Json          @default("[]")
-  status      RmaStatus     @default(REQUESTED)
-  resolution  RmaResolution?
+  id                   String         @id @default(cuid())
+  orderItemId          String
+  requesterId          String
+  reason               String
+  details              String?
+  photos               Json           @default("[]")
+  status               RmaStatus      @default(REQUESTED)
+  resolution           RmaResolution?
   returnTrackingNumber String?
-  refundAmount Int?
-  decidedAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  refundAmount         Int?
+  decidedAt            DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   requester User      @relation(fields: [requesterId], references: [id], onDelete: Cascade)
@@ -1070,14 +1090,14 @@ model RmaRequest {
 // ============================================================================
 
 model LedgerAccount {
-  id       String            @id @default(cuid())
-  code     String            @unique // e.g. "platform:cash", "store:<id>:payable"
-  name     String
-  type     LedgerAccountType
-  currency String
-  userId   String?
-  storeId  String?
-  createdAt DateTime         @default(now())
+  id        String            @id @default(cuid())
+  code      String            @unique // e.g. "platform:cash", "store:<id>:payable"
+  name      String
+  type      LedgerAccountType
+  currency  String
+  userId    String?
+  storeId   String?
+  createdAt DateTime          @default(now())
 
   user  User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
   store Store?       @relation(fields: [storeId], references: [id], onDelete: SetNull)
@@ -1116,16 +1136,16 @@ model LedgerLine {
 }
 
 model Payout {
-  id        String       @id @default(cuid())
-  storeId   String
-  amount    Int
-  currency  String
-  status    PayoutStatus @default(PENDING)
-  stripePayoutId String? @unique
-  arrivalAt DateTime?
-  failureReason String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id             String       @id @default(cuid())
+  storeId        String
+  amount         Int
+  currency       String
+  status         PayoutStatus @default(PENDING)
+  stripePayoutId String?      @unique
+  arrivalAt      DateTime?
+  failureReason  String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
 
@@ -1137,20 +1157,20 @@ model Payout {
 // ============================================================================
 
 model Dispute {
-  id          String        @id @default(cuid())
-  subOrderId  String
-  orderItemId String?
-  openedById  String
-  reason      DisputeReason
-  description String
-  evidence    Json          @default("[]") // [{key, fileName, note}]
-  status      DisputeStatus @default(OPEN)
-  resolution  String?
+  id           String        @id @default(cuid())
+  subOrderId   String
+  orderItemId  String?
+  openedById   String
+  reason       DisputeReason
+  description  String
+  evidence     Json          @default("[]") // [{key, fileName, note}]
+  status       DisputeStatus @default(OPEN)
+  resolution   String?
   refundAmount Int?
   resolvedById String?
-  resolvedAt  DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  resolvedAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   subOrder   SubOrder   @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
   orderItem  OrderItem? @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
@@ -1195,17 +1215,17 @@ model ConversationParticipant {
 }
 
 model Message {
-  id             String      @id @default(cuid())
-  conversationId String
-  senderId       String
-  kind           MessageKind @default(TEXT)
-  body           String?
-  attachments    Json        @default("[]")
+  id                   String      @id @default(cuid())
+  conversationId       String
+  senderId             String
+  kind                 MessageKind @default(TEXT)
+  body                 String?
+  attachments          Json        @default("[]")
   // structured custom offer: {listingId, title, price, deliveryDays, revisions}
-  offerPayload   Json?
-  flaggedCircumvention Boolean @default(false) // anti off-platform-payment filter
-  editedAt       DateTime?
-  createdAt      DateTime    @default(now())
+  offerPayload         Json?
+  flaggedCircumvention Boolean     @default(false) // anti off-platform-payment filter
+  editedAt             DateTime?
+  createdAt            DateTime    @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
@@ -1235,19 +1255,19 @@ model Notification {
 // ============================================================================
 
 model Review {
-  id          String       @id @default(cuid())
-  orderItemId String
-  listingId   String
-  authorId    String
-  subjectId   String // the seller being reviewed
-  rating      Int // 1..5
-  title       String?
-  body        String?
-  sellerReply String?
+  id              String       @id @default(cuid())
+  orderItemId     String
+  listingId       String
+  authorId        String
+  subjectId       String // the seller being reviewed
+  rating          Int // 1..5
+  title           String?
+  body            String?
+  sellerReply     String?
   sellerRepliedAt DateTime?
-  status      ReviewStatus @default(PUBLISHED)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  status          ReviewStatus @default(PUBLISHED)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
   listing   Listing   @relation(fields: [listingId], references: [id], onDelete: Cascade)
@@ -1292,21 +1312,21 @@ model Referral {
 }
 
 model FraudFlag {
-  id         String          @id @default(cuid())
-  reporterId String?
+  id            String          @id @default(cuid())
+  reporterId    String?
   subjectUserId String?
-  storeId    String?
-  listingId  String?
-  reason     String
-  details    Json            @default("{}")
-  status     FraudFlagStatus @default(OPEN)
-  createdAt  DateTime        @default(now())
-  resolvedAt DateTime?
+  storeId       String?
+  listingId     String?
+  reason        String
+  details       Json            @default("{}")
+  status        FraudFlagStatus @default(OPEN)
+  createdAt     DateTime        @default(now())
+  resolvedAt    DateTime?
 
   reporter    User?    @relation("FraudFlagReporter", fields: [reporterId], references: [id], onDelete: SetNull)
   subjectUser User?    @relation("FraudFlagSubject", fields: [subjectUserId], references: [id], onDelete: Cascade)
   store       Store?   @relation("FraudFlagStore", fields: [storeId], references: [id], onDelete: Cascade)
-  listing    Listing?  @relation("FraudFlagListing", fields: [listingId], references: [id], onDelete: Cascade)
+  listing     Listing? @relation("FraudFlagListing", fields: [listingId], references: [id], onDelete: Cascade)
 
   @@index([status])
 }
@@ -1352,4 +1372,24 @@ model WebhookEvent {
   @@unique([provider, eventId])
   @@index([status, receivedAt])
   @@index([type])
+}
+
+// Stock held for an unpaid order. HELD reservations add to
+// InventoryLevel.reserved; payment COMMITs them (onHand decreases), expiry or
+// cancellation RELEASEs them.
+model InventoryReservation {
+  id               String            @id @default(cuid())
+  orderItemId      String
+  inventoryLevelId String
+  quantity         Int
+  status           ReservationStatus @default(HELD)
+  expiresAt        DateTime
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  orderItem      OrderItem      @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  inventoryLevel InventoryLevel @relation(fields: [inventoryLevelId], references: [id], onDelete: Restrict)
+
+  @@index([status, expiresAt])
+  @@index([orderItemId])
 }
