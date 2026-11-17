@@ -6,6 +6,7 @@ import { Gallery } from "@/components/storefront/gallery";
 import { JsonLd } from "@/components/storefront/json-ld";
 import { ListingGrid, Rating } from "@/components/storefront/listing-card";
 import { Markdown } from "@/components/storefront/markdown";
+import { ContactSellerButton } from "@/components/messages/contact-seller-button";
 import { ListingPurchase } from "@/components/storefront/listing-purchase";
 import { absoluteUrl, siteUrl } from "@/lib/env";
 import { countryName, listingImages, purchaseData } from "@/lib/storefront/detail";
@@ -145,6 +146,9 @@ export default async function ListingPage({ params }: { params: Promise<{ slug: 
             <span className="text-muted-foreground">
               {countryName(listing.store.country)} · selling since {listing.store.createdAt.getFullYear()}
             </span>
+            <div className="pt-2">
+              <ContactSellerButton storeId={listing.store.id} listingId={listing.id} returnTo={`/listing/${listing.slug}`} />
+            </div>
           </div>
         </aside>
       </div>

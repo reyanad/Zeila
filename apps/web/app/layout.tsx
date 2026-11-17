@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { RealtimeProvider } from "@/components/realtime/realtime-provider";
 import { SiteHeader } from "@/components/site-header";
+import { getCurrentUser } from "@/lib/auth/session";
+import { realtimeUrl } from "@/lib/realtime";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,12 +12,15 @@ export const metadata: Metadata = {
     "All-in-one marketplace for physical products, digital assets and professional services with escrow-protected payments.",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const user = await getCurrentUser();
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
-        <SiteHeader />
-        <main>{children}</main>
+        <RealtimeProvider url={user ? realtimeUrl() : null}>
+          <SiteHeader />
+          <main>{children}</main>
+        </RealtimeProvider>
       </body>
     </html>
   );

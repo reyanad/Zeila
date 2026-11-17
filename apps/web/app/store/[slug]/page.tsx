@@ -10,11 +10,12 @@ import { countryName } from "@/lib/storefront/detail";
 import { getFxRates, getViewerCurrency } from "@/lib/storefront/fx";
 import { runSearch } from "@/lib/storefront/search";
 import { parseSearch, type RawSearchParams } from "@/lib/storefront/search-params";
+import { ContactSellerButton } from "@/components/messages/contact-seller-button";
 
 const loadStore = cache(async (slug: string) =>
   prisma.store.findFirst({
     where: { slug, status: "ACTIVE" },
-    select: { name: true, slug: true, tagline: true, description: true, country: true, createdAt: true, vacationMode: true },
+    select: { id: true, name: true, slug: true, tagline: true, description: true, country: true, createdAt: true, vacationMode: true },
   }),
 );
 
@@ -45,6 +46,9 @@ export default async function StorePage({ params, searchParams }: { params: Prom
         <p className="text-sm text-muted-foreground">
           {countryName(store.country)} · selling since {store.createdAt.getFullYear()}
         </p>
+        <div className="pt-2">
+          <ContactSellerButton storeId={store.id} listingId={null} returnTo={`/store/${store.slug}`} label="Message this store" />
+        </div>
       </header>
       {result === null ? (
         <p className="rounded-lg border border-dashed border-border p-10 text-center text-sm text-muted-foreground">

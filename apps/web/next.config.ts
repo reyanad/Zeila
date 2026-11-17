@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
     "@marketplace/search",
     "@marketplace/jobs",
     "@marketplace/core",
+    "@marketplace/realtime",
   ],
   experimental: {
     // KYC uploads: up to four documents of 10 MB each in one server action.
