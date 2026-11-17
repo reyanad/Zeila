@@ -1,0 +1,221 @@
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import Link from "next/link";
+import { prisma, type KycStatus, type StoreStatus, type StripeOnboardingStatus } from "@marketplace/database";
+import { countryOptions } from "@marketplace/shared-types";
+import { Alert, Badge, type BadgeTone, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@marketplace/ui";
+import { CreateStoreForm } from "@/components/seller/create-store-form";
+import { KycForm } from "@/components/seller/kyc-form";
+import { StripeConnectForm } from "@/components/seller/stripe-connect-form";
+import { requireUser } from "@/lib/auth/session";
+import { stripeSecretKey } from "@/lib/env";
+
+export const metadata: Metadata = { title: "Seller setup" };
+
+type StepState = "done" | "review" | "todo" | "locked" | "attention";
+
+const STEP_BADGE: Record<StepState, { tone: BadgeTone; label: string }> = {
+  done: { tone: "success", label: "Done" },
+  review: { tone: "info", label: "In review" },
+  todo: { tone: "warning", label: "To do" },
+  locked: { tone: "neutral", label: "Locked" },
+  attention: { tone: "danger", label: "Needs attention" },
+};
+
+const STORE_STATUS_LABEL: Record<StoreStatus, string> = {
+  DRAFT: "Setup in progress",
+  PENDING_REVIEW: "Waiting for identity review",
+  ACTIVE: "Open for business",
+  SUSPENDED: "Suspended",
+  CLOSED: "Closed",
+};
+
+const STRIPE_MESSAGES: Record<string, { tone: "info" | "warning"; text: string }> = {
+  returned: { tone: "info", text: "Welcome back from Stripe. Your payout status below is up to date." },
+  "sync-failed": { tone: "warning", text: "Stripe did not answer just now. Your payout status will update within a few minutes." },
+  "link-failed": { tone: "warning", text: "The Stripe link expired and a new one could not be created. Try again below." },
+};
+
+function Step({ number, title, description, state, children }: {
+  number: number;
+  title: string;
+  description: string;
+  state: StepState;
+  children: ReactNode;
+}) {
+  const badge = STEP_BADGE[state];
+  return (
+    <Card aria-labelledby={`step-${number}`}>
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <CardTitle id={`step-${number}`}>
+            <span className="mr-2 text-muted-foreground">{number}.</span>
+            {title}
+          </CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+        <Badge tone={badge.tone}>{badge.label}</Badge>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+function kycState(status: KycStatus | undefined, hasStore: boolean): StepState {
+  if (!hasStore) return "locked";
+  if (status === "APPROVED") return "done";
+  if (status === "PENDING") return "review";
+  if (status === "REJECTED") return "attention";
+  return "todo";
+}
+
+function payoutState(status: StripeOnboardingStatus | undefined, payoutsEnabled: boolean, hasStore: boolean): StepState {
+  if (!hasStore) return "locked";
+  if (status === "COMPLETE" && payoutsEnabled) return "done";
+  if (status === "RESTRICTED") return "attention";
+  return "todo";
+}
+
+export default async function SellerOnboardingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const user = await requireUser("/seller/onboarding");
+  const params = await searchParams;
+  const stripeOutcome = typeof params.stripe === "string" ? STRIPE_MESSAGES[params.stripe] : undefined;
+
+  const [store, kyc] = await Promise.all([
+    prisma.store.findUnique({
+      where: { sellerId: user.id },
+      select: {
+        name: true,
+        slug: true,
+        status: true,
+        country: true,
+        currency: true,
+        stripeAccountId: true,
+        stripeOnboarding: true,
+        payoutsEnabled: true,
+      },
+    }),
+    prisma.kycSubmission.findFirst({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      select: { status: true, rejectionReason: true, createdAt: true },
+    }),
+  ]);
+
+  const countries = countryOptions().map((country) => ({ value: country.code, label: country.name }));
+  const paymentsConfigured = stripeSecretKey() !== null;
+  const hasStore = store !== null;
+  const identity = kycState(kyc?.status, hasStore);
+  const payouts = payoutState(store?.stripeOnboarding, store?.payoutsEnabled ?? false, hasStore);
+
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">Seller setup</h1>
+        <p className="text-sm text-muted-foreground">
+          Three steps before you can sell: open your store, verify your identity, and connect a payout account.
+          Buyers&apos; payments are held safely until each order is delivered, then paid out to you.
+        </p>
+      </div>
+
+      {!user.emailVerified ? (
+        <Alert tone="warning" title="Confirm your email first">
+          We sent a confirmation link when you registered. Open it, then come back to set up your store.
+        </Alert>
+      ) : null}
+      {stripeOutcome ? <Alert tone={stripeOutcome.tone}>{stripeOutcome.text}</Alert> : null}
+
+      <Step
+        number={1}
+        title="Open your store"
+        description="Your store name and address are public; the country sets where you are paid."
+        state={hasStore ? "done" : "todo"}
+      >
+        {store ? (
+          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">Store</dt>
+              <dd className="font-medium">{store.name}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Address</dt>
+              <dd className="font-medium">/store/{store.slug}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Status</dt>
+              <dd className="font-medium">{STORE_STATUS_LABEL[store.status]}</dd>
+            </div>
+          </dl>
+        ) : (
+          <CreateStoreForm countries={countries} />
+        )}
+      </Step>
+
+      <Step
+        number={2}
+        title="Verify your identity"
+        description="Required by law for anyone who receives payouts. Our team reviews your documents."
+        state={identity}
+      >
+        {identity === "locked" ? (
+          <p className="text-sm text-muted-foreground">Open your store first.</p>
+        ) : identity === "done" ? (
+          <p className="text-sm">Your identity is verified.</p>
+        ) : identity === "review" ? (
+          <p className="text-sm">
+            Submitted on {kyc?.createdAt.toLocaleDateString("en-GB", { dateStyle: "medium" })}. Review usually takes one to
+            two business days; we will email you when it is done.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {identity === "attention" ? (
+              <Alert tone="danger" title="Your last submission was not accepted">
+                {kyc?.rejectionReason ?? "The documents could not be verified."} Please submit again.
+              </Alert>
+            ) : null}
+            <KycForm countries={countries} />
+          </div>
+        )}
+      </Step>
+
+      <Step
+        number={3}
+        title="Connect payouts"
+        description="Stripe holds and sends your earnings to your bank account. Setup takes about five minutes."
+        state={payouts}
+      >
+        {payouts === "locked" ? (
+          <p className="text-sm text-muted-foreground">Open your store first.</p>
+        ) : !paymentsConfigured ? (
+          <Alert tone="warning" title="Payouts are not available yet">
+            The platform has not finished its Stripe setup. You can complete the other steps now.
+          </Alert>
+        ) : payouts === "done" ? (
+          <p className="text-sm">Payouts are connected. Earnings are paid out once orders are released from escrow.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {payouts === "attention" ? (
+              <Alert tone="danger" title="Stripe needs more information">
+                Your payout account is restricted. Continue on Stripe to see what is missing.
+              </Alert>
+            ) : null}
+            <StripeConnectForm label={store?.stripeAccountId ? "Continue on Stripe" : "Set up payouts with Stripe"} />
+          </div>
+        )}
+      </Step>
+
+      {store?.status === "ACTIVE" ? (
+        <Alert tone="success" title="You are ready to sell">
+          Your store is open. Listing tools arrive in the Vendor Studio.{" "}
+          <Link href="/account" className="font-medium underline underline-offset-4">
+            Back to your account
+          </Link>
+        </Alert>
+      ) : null}
+    </>
+  );
+}

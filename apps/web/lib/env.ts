@@ -33,6 +33,14 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: optionalString,
   STRIPE_WEBHOOK_SECRET: optionalString,
   STRIPE_CONNECT_WEBHOOK_SECRET: optionalString,
+  // Country of the platform's own Stripe account. Sellers elsewhere are
+  // onboarded as cross-border "recipient" accounts (transfers only).
+  STRIPE_PLATFORM_COUNTRY: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{2}$/, "STRIPE_PLATFORM_COUNTRY must be an ISO-3166 alpha-2 code")
+    .default("US"),
 
   S3_ENDPOINT: optionalString,
   S3_REGION: z.string().default("auto"),
