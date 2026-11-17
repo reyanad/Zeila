@@ -49,6 +49,10 @@ const envSchema = z.object({
   S3_BUCKET_PUBLIC: z.string().default("marketplace-public"),
   S3_BUCKET_VAULT: z.string().default("marketplace-vault"),
   LOCAL_STORAGE_DIR: z.string().default(".data/storage"),
+  // Public base URL of the public bucket (e.g. an R2 custom domain). When
+  // empty, storefront images are served through /api/assets.
+  PUBLIC_ASSET_BASE_URL: optionalString,
+  DIGITAL_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(5_000).default(500),
 });
 
 export type Env = z.infer<typeof envSchema>;
@@ -155,4 +159,14 @@ export function superAdminEmails(): ReadonlySet<string> {
       .map((email) => email.trim().toLowerCase())
       .filter((email) => email.length > 0),
   );
+}
+
+/** URL for an object in the public bucket. */
+export function publicAssetUrl(key: string): string {
+  const base = getEnv().PUBLIC_ASSET_BASE_URL;
+  return base ? `${base.replace(/\/+$/, "")}/${key}` : `/api/assets/${key}`;
+}
+
+export function digitalUploadMaxBytes(): number {
+  return getEnv().DIGITAL_UPLOAD_MAX_MB * 1024 * 1024;
 }

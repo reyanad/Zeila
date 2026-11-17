@@ -13,13 +13,20 @@ import { getEnv } from "@/lib/env";
  *   falls back to AUTH_SECRET so the app runs with a single secret.
  */
 
-export type KeyPurpose = "login-ticket" | "field-encryption" | "object-encryption";
+export type KeyPurpose =
+  | "login-ticket"
+  | "upload-ticket"
+  | "download-ticket"
+  | "field-encryption"
+  | "object-encryption";
 
 const cache = new Map<KeyPurpose, Buffer>();
 
 function masterSecret(purpose: KeyPurpose): Buffer {
   const env = getEnv();
-  if (purpose === "login-ticket") return Buffer.from(env.AUTH_SECRET, "utf8");
+  if (purpose === "login-ticket" || purpose === "upload-ticket" || purpose === "download-ticket") {
+    return Buffer.from(env.AUTH_SECRET, "utf8");
+  }
   if (env.DATA_ENCRYPTION_KEY) {
     const key = Buffer.from(env.DATA_ENCRYPTION_KEY, "base64");
     if (key.length < 32) {
