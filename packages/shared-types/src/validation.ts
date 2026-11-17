@@ -3,6 +3,7 @@
  * server actions and the mobile app all validate against the same shapes.
  */
 import { z } from "zod";
+import { isCountryCode } from "./countries";
 import { SUPPORTED_CURRENCIES } from "./money";
 
 // ---------------------------------------------------------------------------
@@ -29,7 +30,7 @@ export const countryCodeSchema = z
   .string()
   .trim()
   .toUpperCase()
-  .regex(/^[A-Z]{2}$/, "Choose a country");
+  .refine(isCountryCode, "Choose a country");
 
 export const currencyCodeSchema = z.enum(SUPPORTED_CURRENCIES, "Choose a supported currency");
 
