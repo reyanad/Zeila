@@ -105,6 +105,7 @@ export const ORDER_NUMBER_PREFIX = "MP";
 
 export * from "./commerce";
 export * from "./countries";
+export * from "./fulfilment";
 export * from "./listing";
 export * from "./money";
 export * from "./rbac";
