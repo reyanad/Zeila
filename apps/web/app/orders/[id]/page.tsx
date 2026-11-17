@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@marketplace/database";
 import { Alert, Badge, buttonVariants } from "@marketplace/ui";
+import { ConfirmReceivedButton } from "@/components/orders/confirm-received-button";
 import { PaymentPending } from "@/components/orders/payment-pending";
 import { formatPrice } from "@/components/storefront/price";
 import { requireUser } from "@/lib/auth/session";
@@ -28,7 +29,23 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
     where: { id, buyerId: user.id },
     include: {
       subOrders: {
-        include: { store: { select: { name: true, slug: true } }, items: { select: { id: true, titleSnapshot: true, variantSnapshot: true, quantity: true, unitPrice: true, lineTotal: true, listingType: true } } },
+        include: {
+          store: { select: { name: true, slug: true } },
+          escrow: { select: { status: true, holdUntil: true } },
+          items: {
+            select: {
+              id: true,
+              titleSnapshot: true,
+              variantSnapshot: true,
+              quantity: true,
+              unitPrice: true,
+              lineTotal: true,
+              listingType: true,
+              downloadGrants: { select: { id: true, downloadsUsed: true, digitalAsset: { select: { fileName: true, downloadLimit: true } } } },
+              licenseKey: { select: { key: true, status: true, activationsLimit: true } },
+            },
+          },
+        },
       },
       payments: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true, failureReason: true } },
     },
@@ -90,19 +107,52 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
               {subOrder.items.map((item) => {
                 const label = typeof (item.variantSnapshot as { label?: unknown } | null)?.label === "string" ? (item.variantSnapshot as { label: string }).label : null;
                 return (
-                  <li key={item.id} className="flex justify-between gap-3 py-2">
-                    <span>
-                      {item.titleSnapshot}
-                      {label ? <span className="block text-xs text-muted-foreground">{label}</span> : null}
-                      <span className="block text-xs text-muted-foreground tabular-nums">
-                        {item.quantity} × {money(item.unitPrice)}
+                  <li key={item.id} className="flex flex-col gap-2 py-2">
+                    <div className="flex justify-between gap-3">
+                      <span>
+                        {item.titleSnapshot}
+                        {label ? <span className="block text-xs text-muted-foreground">{label}</span> : null}
+                        <span className="block text-xs text-muted-foreground tabular-nums">
+                          {item.quantity} × {money(item.unitPrice)}
+                        </span>
                       </span>
-                    </span>
-                    <span className="tabular-nums">{money(item.lineTotal)}</span>
+                      <span className="tabular-nums">{money(item.lineTotal)}</span>
+                    </div>
+                    {item.downloadGrants.map((grant) => {
+                      const limit = grant.digitalAsset.downloadLimit;
+                      const left = limit === null ? null : Math.max(0, limit - grant.downloadsUsed);
+                      return (
+                        <div key={grant.id} className="flex flex-wrap items-center gap-3 rounded-md bg-muted/60 px-3 py-2">
+                          {left === 0 ? (
+                            <span className="text-xs text-muted-foreground">Download limit reached</span>
+                          ) : (
+                            <a href={`/api/downloads/${grant.id}`} className={buttonVariants({ size: "sm" })}>
+                              Download {grant.digitalAsset.fileName}
+                            </a>
+                          )}
+                          <span className="text-xs text-muted-foreground">{left === null ? "Unlimited downloads" : `${left} download${left === 1 ? "" : "s"} left`}</span>
+                        </div>
+                      );
+                    })}
+                    {item.licenseKey ? (
+                      <div className="rounded-md border border-border px-3 py-2">
+                        <span className="text-xs text-muted-foreground">Licence key ({item.licenseKey.activationsLimit} device{item.licenseKey.activationsLimit === 1 ? "" : "s"})</span>
+                        <code className="block select-all font-mono text-sm">{item.licenseKey.key}</code>
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}
             </ul>
+            {subOrder.escrow?.status === "HELD" && (subOrder.status === "SHIPPED" || subOrder.status === "DELIVERED") ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/60 px-3 py-2 text-sm">
+                <span>
+                  Payment held in escrow until {subOrder.escrow.holdUntil.toLocaleDateString("en-GB", { dateStyle: "medium" })} unless you confirm sooner.
+                </span>
+                <ConfirmReceivedButton orderId={order.id} subOrderId={subOrder.id} storeName={subOrder.store.name} />
+              </div>
+            ) : null}
+            {subOrder.escrow?.status === "FROZEN" ? <p className="text-sm text-muted-foreground">Payment is on hold while a dispute is reviewed.</p> : null}
             <dl className="grid grid-cols-[1fr_auto] gap-x-4 text-sm text-muted-foreground">
               {subOrder.discountTotal > 0 ? (
                 <>

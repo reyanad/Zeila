@@ -1,7 +1,7 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import Stripe from "stripe";
-import { expireStaleOrders } from "@marketplace/core";
+import { expireStaleOrders, releaseEligibleEscrows, transferPendingPayouts } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type SearchJob } from "@marketplace/jobs";
 import { createSearchClient, ensureListingsIndex } from "@marketplace/search";
@@ -42,6 +42,11 @@ async function main(): Promise<void> {
     { name: "expire-orders", data: { kind: "expire-orders" }, opts: { ...DEFAULT_JOB_OPTIONS, attempts: 1 } },
   );
   await maintenanceQueue.upsertJobScheduler(
+    "release-escrow",
+    { every: 10 * 60_000 },
+    { name: "release-escrow", data: { kind: "release-escrow" }, opts: { ...DEFAULT_JOB_OPTIONS, attempts: 1 } },
+  );
+  await maintenanceQueue.upsertJobScheduler(
     "fx-rates-daily",
     { pattern: "17 3 * * *" },
     { name: "fx-rates", data: { kind: "fx-rates" }, opts: DEFAULT_JOB_OPTIONS },
@@ -54,6 +59,12 @@ async function main(): Promise<void> {
         case "expire-orders": {
           const cancelled = await expireStaleOrders(stripe, new Date());
           return `expired ${cancelled} unpaid orders`;
+        }
+        case "release-escrow": {
+          const now = new Date();
+          const released = await releaseEligibleEscrows(now);
+          const transferred = stripe ? await transferPendingPayouts(stripe) : 0;
+          return `released ${released} escrows, transferred ${transferred}${stripe ? "" : " (Stripe not configured)"}`;
         }
         case "fx-rates": {
           const fx = await refreshFxRates(env.FX_RATES_URL);

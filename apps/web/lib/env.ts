@@ -56,6 +56,7 @@ const envSchema = z.object({
   // Public base URL of the public bucket (e.g. an R2 custom domain). When
   // empty, storefront images are served through /api/assets.
   PUBLIC_ASSET_BASE_URL: optionalString,
+  SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(30).max(3_600).default(300),
   DIGITAL_UPLOAD_MAX_MB: z.coerce.number().int().min(1).max(5_000).default(500),
 });
 

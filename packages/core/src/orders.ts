@@ -1,18 +1,8 @@
 import type Stripe from "stripe";
-import { prisma, type Prisma } from "@marketplace/database";
+import { prisma } from "@marketplace/database";
+import { fulfillPaidOrder } from "./fulfillment";
 import { commitReservations, releaseReservations } from "./inventory";
-
-/**
- * Hooks run inside the payment transaction once an order is paid. Phase 6
- * registers ledger, escrow and digital-delivery steps here; keeping them in
- * the same transaction means an order is never "paid" without its records.
- */
-export type PaidOrderHook = (tx: Prisma.TransactionClient, orderId: string, paidAt: Date) => Promise<void>;
-const paidOrderHooks: PaidOrderHook[] = [];
-
-export function onOrderPaid(hook: PaidOrderHook): void {
-  if (!paidOrderHooks.includes(hook)) paidOrderHooks.push(hook);
-}
+import { getSetting } from "./settings";
 
 export type PaymentOutcome = "completed" | "already-paid" | "amount-mismatch" | "not-pending" | "missing";
 
@@ -28,10 +18,12 @@ export interface PaymentReceipt {
 
 /**
  * Mark an order paid: statuses, payment row, stock committed, purchased
- * lines removed from the buyer's cart, sales counters, then every registered
- * hook, all atomically. Safe to call twice for the same payment.
+ * lines removed from the buyer's cart, sales counters, the ledger entry,
+ * escrow and digital delivery, all in one transaction. An order is never
+ * "paid" without its money records. Safe to call twice for the same payment.
  */
 export async function completeOrderPayment(receipt: PaymentReceipt): Promise<PaymentOutcome> {
+  const escrowHoldDays = await getSetting("escrowHoldDays");
   return prisma.$transaction(
     async (tx) => {
       const order = await tx.order.findUnique({
@@ -71,7 +63,7 @@ export async function completeOrderPayment(receipt: PaymentReceipt): Promise<Pay
           where: { cartId: cart.id, OR: items.map((item) => ({ listingId: item.listingId, skuId: item.skuId, serviceTierId: item.serviceTierId })) },
         });
       }
-      for (const hook of paidOrderHooks) await hook(tx, order.id, receipt.paidAt);
+      await fulfillPaidOrder(tx, order.id, receipt.paidAt, escrowHoldDays);
       return "completed";
     },
     { timeout: 30_000 },
