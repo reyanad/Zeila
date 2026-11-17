@@ -83,6 +83,14 @@ jobs:
       - name: Initial migration SQL (for review)
         working-directory: packages/database
         run: npx prisma migrate diff --from-empty --to-schema prisma/schema.prisma --script --output /tmp/init-migration.sql
+      - name: Show the initial migration when none is committed yet
+        working-directory: packages/database
+        run: |
+          if [ ! -d prisma/migrations ]; then
+            echo "----- BEGIN INIT MIGRATION -----"
+            cat /tmp/init-migration.sql
+            echo "----- END INIT MIGRATION -----"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: init-migration

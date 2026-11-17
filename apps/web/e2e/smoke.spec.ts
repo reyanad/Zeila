@@ -8,7 +8,7 @@ test.describe("public pages", () => {
     expect(headers["content-security-policy"]).toContain("'strict-dynamic'");
     expect(headers["x-frame-options"]).toBe("DENY");
     expect(headers["x-powered-by"]).toBeUndefined();
-    await expect(page.getByRole("search")).toBeVisible();
+    await expect(page.getByRole("main").getByRole("search")).toBeVisible();
   });
 
   test("search runs and handles no results", async ({ page }) => {
