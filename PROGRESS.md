@@ -48,7 +48,16 @@ split orders, Stripe Connect escrow, double-entry ledger.
   charges and transfers via `transfer_group`) with the Payment Element, payment webhooks
   (late or mismatched payments are refunded automatically), free-order path, cart,
   checkout, payment and order pages, seller shipping-rates page.
-- [ ] Phase 6 — Idempotent webhooks, ledger engine, digital fulfillment, BullMQ escrow cron
+- [x] **Phase 6 — Ledger, escrow & digital delivery**: immutable double-entry ledger
+  (`postEntry` rejects unbalanced or per-currency mismatched entries; idempotency key per
+  business event; chart of accounts for cash, commission, promotions, refunds and per-store
+  escrow/payable), posted atomically with payment; one escrow per sub-order; instant
+  digital fulfillment (download grants, licence keys from templates) with signed,
+  time-limited download links that stream and decrypt from the vault; buyer
+  "I received it" releases escrow immediately; worker job every 10 minutes releases escrow
+  after the hold period and transfers sellers' share (in the charge's settlement currency)
+  to their connected accounts; chargebacks freeze escrow, won chargebacks unfreeze it;
+  refund and payout webhooks.
 - [ ] Phase 7 — Fulfillment: carrier tracking/RMA, encrypted vault + license API, milestone workspace
 - [ ] Phase 8 — Socket.io messaging, notifications, dispute resolution center
 - [ ] Phase 9 — Flash sales, affiliates, verified reviews, seller analytics
@@ -110,6 +119,17 @@ After the first migration, load the starter categories: `npm run db:seed`.
 - Tax rates are a platform setting (`tax_rates`); until an administrator configures them,
   no tax is charged (admin UI arrives in Phase 10).
 
+## Money flow (Phase 6)
+
+Payment → `platform:cash` debited; each store's share (after commission) credited to
+`store:<id>:escrow`, commission to `platform:fees`, platform-funded discounts debited to
+`platform:promotions`. Release moves escrow → `store:<id>:payable`; the Stripe transfer
+settles payable against cash. `trialBalance()` must always return 0 per currency.
+
+Additional webhook events: platform endpoint `charge.dispute.created`,
+`charge.dispute.closed`, `charge.refunded`; Connect endpoint `payout.created`,
+`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+
 ## Running the worker (Phase 4)
 
 ```bash
@@ -136,7 +156,10 @@ live PostgreSQL database; Phase 12 adds CI integration tests against Postgres + 
 Phase 4 also module-loaded the worker under `tsx` (which caught an ESM/CommonJS export
 bug that type checking missed) and checked document building and currency conversion.
 Phase 5 ran 16 unit checks of the pricing engine (rounding, promo allocation, weight-based
-and free shipping, tax on shipping, international blocking).
+and free shipping, tax on shipping, international blocking). Phase 6 checked ledger
+balancing rules, settlement for platform- and store-funded promos (every payment entry
+balances), licence key generation, and the download route end to end (encrypted vault →
+signed link → decrypted bytes match; expired and forged links refused).
 
 ## Needs owner input
 
