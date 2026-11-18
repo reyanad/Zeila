@@ -1,4 +1,3 @@
-import type Stripe from "stripe";
 import { prisma } from "@marketplace/database";
 import { fulfillPaidOrder } from "./fulfillment";
 import { recordReferralForPaidOrder } from "./affiliates";
@@ -11,9 +10,10 @@ export type PaymentOutcome = "completed" | "already-paid" | "amount-mismatch" | 
 
 export interface PaymentReceipt {
   orderId: string;
-  /** null for orders that cost nothing. */
-  paymentIntentId: string | null;
-  chargeId: string | null;
+  /** Our tx_ref for the payment attempt; null for orders that cost nothing. */
+  providerRef: string | null;
+  /** The provider's reference for the charge. */
+  providerReference: string | null;
   amount: number;
   currency: string;
   paidAt: Date;
@@ -48,10 +48,10 @@ export async function completeOrderPayment(receipt: PaymentReceipt): Promise<Pay
       const claimed = await tx.order.updateMany({ where: { id: order.id, status: "PENDING_PAYMENT" }, data: { status: "PAID", paidAt: receipt.paidAt } });
       if (claimed.count === 0) return "already-paid";
       await tx.subOrder.updateMany({ where: { orderId: order.id }, data: { status: "PAID" } });
-      if (receipt.paymentIntentId) {
+      if (receipt.providerRef) {
         await tx.payment.update({
-          where: { stripePaymentIntentId: receipt.paymentIntentId },
-          data: { status: "SUCCEEDED", stripeChargeId: receipt.chargeId, failureReason: null },
+          where: { providerRef: receipt.providerRef },
+          data: { status: "SUCCEEDED", providerReference: receipt.providerReference, failureReason: null },
         });
       }
       await commitReservations(tx, order.id);
@@ -121,55 +121,4 @@ export async function cancelUnpaidOrder(orderId: string): Promise<boolean> {
     await releaseReservations(tx, orderId);
     return true;
   });
-}
-
-const IN_FLIGHT_STATUSES: ReadonlySet<string> = new Set(["processing", "requires_capture", "succeeded"]);
-
-/**
- * Cancel an unpaid order and its PaymentIntents, unless Stripe is still
- * processing (or has completed) a payment for it; then the order is left for
- * the webhook. Returns whether the order was cancelled.
- */
-export async function abandonOrder(stripe: Stripe | null, orderId: string): Promise<boolean> {
-  const payments = await prisma.payment.findMany({ where: { orderId, status: { notIn: ["CANCELLED", "SUCCEEDED"] } } });
-  if (stripe) {
-    for (const payment of payments) {
-      const intent = await stripe.paymentIntents.retrieve(payment.stripePaymentIntentId);
-      if (IN_FLIGHT_STATUSES.has(intent.status)) return false;
-      if (intent.status !== "canceled") {
-        await stripe.paymentIntents.cancel(intent.id).catch((error: unknown) => {
-          console.error(`[orders] could not cancel PaymentIntent ${intent.id}`, error);
-        });
-      }
-    }
-  } else if (payments.length > 0) {
-    // Without Stripe credentials the payment state cannot be checked; leave the order alone.
-    return false;
-  }
-  return cancelUnpaidOrder(orderId);
-}
-
-/** Sweep: cancel unpaid orders past their payment deadline. Run every few minutes. */
-export async function expireStaleOrders(stripe: Stripe | null, now: Date, limit = 100): Promise<number> {
-  const stale = await prisma.order.findMany({
-    where: { status: "PENDING_PAYMENT", expiresAt: { lt: now } },
-    orderBy: { expiresAt: "asc" },
-    take: limit,
-    select: { id: true },
-  });
-  let cancelled = 0;
-  for (const order of stale) {
-    try {
-      if (await abandonOrder(stripe, order.id)) cancelled += 1;
-    } catch (error) {
-      console.error(`[orders] could not expire order ${order.id}`, error);
-    }
-  }
-  return cancelled;
-}
-
-/** Before a new checkout, cancel the buyer's earlier unpaid orders in the same currency (they hold stock). */
-export async function abandonPendingOrders(stripe: Stripe | null, buyerId: string, currency: string): Promise<void> {
-  const pending = await prisma.order.findMany({ where: { buyerId, currency, status: "PENDING_PAYMENT" }, select: { id: true } });
-  for (const order of pending) await abandonOrder(stripe, order.id);
 }

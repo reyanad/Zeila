@@ -8,6 +8,13 @@ export type MinorUnits = number;
 export const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP", "ETB", "KES", "NGN", "AED", "INR"] as const;
 export type CurrencyCode = (typeof SUPPORTED_CURRENCIES)[number];
 
+/**
+ * Currencies stores sell and are paid out in. Chapa pays sellers in birr, so
+ * prices are set in ETB; other currencies are only shown as conversions.
+ */
+export const STORE_CURRENCIES = ["ETB"] as const satisfies readonly CurrencyCode[];
+export type StoreCurrencyCode = (typeof STORE_CURRENCIES)[number];
+
 /** Currencies whose minor unit is not 1/100 (none supported yet, kept for growth). */
 export const ZERO_DECIMAL_CURRENCIES: ReadonlySet<string> = new Set(["JPY", "KRW"]);
 

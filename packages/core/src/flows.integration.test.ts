@@ -1,4 +1,3 @@
-import type Stripe from "stripe";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@marketplace/database";
 import { escrowReconciliation } from "./admin";
@@ -6,12 +5,14 @@ import { attributeOrder, joinAffiliateProgram, settleReferrals } from "./affilia
 import { addToCart, getOrCreateCart } from "./cart";
 import { placeOrder } from "./checkout";
 import { acceptDisputeProposal, openDispute, postDisputeMessage } from "./disputes";
-import { releaseEligibleEscrows } from "./escrow";
+import { reconcilePayouts, releaseEligibleEscrows, transferPendingPayouts } from "./escrow";
+import { encryptAtRest } from "./field-crypto";
+import type { GatewayTransaction, PaymentGateway, RefundInit, TransferInit } from "./gateway";
 import { claimFlashUnits, createFlashSale } from "./flash-sales";
 import { trialBalance } from "./ledger";
 import { activateLicense } from "./licenses";
 import { openConversation, postMessage } from "./messaging";
-import { completeOrderPayment } from "./orders";
+import { confirmPayment, startCheckout } from "./payments";
 import { completeReturn, decideReturn, requestReturn } from "./returns";
 import { approveDelivery, startWork, submitDelivery } from "./services";
 import { addTrackingEvent, shipSubOrder } from "./shipping";
@@ -24,12 +25,37 @@ import { addTrackingEvent, shipSubOrder } from "./shipping";
 
 const run = Date.now().toString(36);
 const now = new Date();
-let refundCount = 0;
-const stripe = {
-  refunds: {
-    create: async (params: { amount?: number }) => ({ id: `re_${run}_${++refundCount}`, amount: params.amount ?? 0, status: "succeeded" }),
+
+/** In-memory stand-in for Chapa: charges are "paid" by the test, refunds and transfers are recorded. */
+const charges = new Map<string, GatewayTransaction>();
+const refundsSent: RefundInit[] = [];
+const transfersSent: TransferInit[] = [];
+const gateway: PaymentGateway = {
+  name: "chapa",
+  initializeCheckout: async (input) => ({ checkoutUrl: `https://checkout.chapa.test/${input.txRef}` }),
+  verifyTransaction: async (txRef) => charges.get(txRef) ?? { status: "not_found", amount: 0, currency: "", reference: null, method: null, paidAt: null },
+  refund: async (input) => {
+    refundsSent.push(input);
+    return { refundId: `rf_${run}_${refundsSent.length}`, state: "PROCESSING" };
   },
-} as unknown as Stripe;
+  verifyRefund: async () => ({ state: "REFUNDED", amount: null }),
+  transfer: async (input) => {
+    transfersSent.push(input);
+    return { kind: "queued", transferId: `tr_${run}_${transfersSent.length}` };
+  },
+  verifyTransfer: async () => ({ status: "success", message: null }),
+  listBanks: async () => [{ id: 946, name: "Commercial Bank of Ethiopia", accountLength: 13, currency: "ETB", isMobileMoney: false }],
+};
+const urls = { returnUrl: "https://zeila.test/return", callbackUrl: "https://zeila.test/callback" };
+
+/** Pay an order the way production does: hosted checkout, then Chapa's verify endpoint confirms it. */
+async function pay(orderId: string): Promise<void> {
+  const { checkoutUrl } = await startCheckout(gateway, orderId, urls, new Date());
+  const txRef = checkoutUrl.split("/").pop() ?? "";
+  const payment = await prisma.payment.findUniqueOrThrow({ where: { providerRef: txRef } });
+  charges.set(txRef, { status: "success", amount: payment.amount, currency: payment.currency, reference: `CH${txRef}`, method: "telebirr", paidAt: new Date() });
+  expect(await confirmPayment(gateway, txRef, new Date())).toBe("paid");
+}
 
 const ids = {} as {
   buyer: string;
@@ -68,10 +94,7 @@ async function checkout(buyerId: string, lines: Array<{ listingId: string; skuId
     taxCountry: "ET",
     now: new Date(),
   });
-  const intent = `pi_${run}_${order.id}`;
-  await prisma.payment.create({ data: { orderId: order.id, stripePaymentIntentId: intent, amount: order.grandTotal, currency: order.currency, status: "PROCESSING" } });
-  const outcome = await completeOrderPayment({ orderId: order.id, paymentIntentId: intent, chargeId: `ch_${run}_${order.id}`, amount: order.grandTotal, currency: order.currency, paidAt: new Date() });
-  expect(outcome).toBe("completed");
+  await pay(order.id);
   return order;
 }
 
@@ -92,8 +115,11 @@ beforeAll(async () => {
         country: "ET",
         currency: "ETB",
         payoutsEnabled: true,
-        chargesEnabled: true,
-        stripeOnboarding: "COMPLETE",
+        payoutBankId: 946,
+        payoutBankName: "Commercial Bank of Ethiopia",
+        payoutAccountName: `Seller ${slug}`,
+        payoutAccountNumber: encryptAtRest("1000123456789"),
+        payoutAccountLast4: "6789",
         shippingProfile: { domestic: { base: 15_000, perKg: 5_000 }, international: null, freeOverDomestic: null, handlingDays: 2 },
       },
       select: { id: true },
@@ -160,7 +186,7 @@ describe("checkout, payment and escrow", () => {
     const rmaId = await requestReturn(ids.buyer, physicalItem?.id ?? "", { reason: "damaged", details: "One bag arrived torn", quantity: 1 }, new Date());
     expect((await prisma.escrow.findUniqueOrThrow({ where: { subOrderId: subOrder.id } })).status).toBe("FROZEN");
     await decideReturn(ids.seller, rmaId, true, "Send it back to our Merkato shop", new Date());
-    await completeReturn(stripe, ids.seller, rmaId, { refundAmount: 120_000, restock: true }, new Date());
+    await completeReturn(gateway, ids.seller, rmaId, { refundAmount: 120_000, restock: true }, new Date());
     const escrow = await prisma.escrow.findUniqueOrThrow({ where: { subOrderId: subOrder.id } });
     expect(escrow.status).toBe("HELD");
     expect(escrow.refunded).toBeGreaterThan(0);
@@ -174,6 +200,54 @@ describe("checkout, payment and escrow", () => {
     expect(after.released).toBe(after.amount - after.refunded);
     await booksBalance();
   });
+
+  it("pays released money to the seller's account by Chapa transfer", async () => {
+    const subOrder = await prisma.subOrder.findFirstOrThrow({ where: { orderId }, select: { id: true, escrow: { select: { released: true } } } });
+    const before = transfersSent.length;
+    expect(await transferPendingPayouts(gateway, new Date())).toBeGreaterThanOrEqual(1);
+    const sent = transfersSent.slice(before).find((transfer) => transfer.amount === subOrder.escrow?.released);
+    expect(sent?.accountNumber).toBe("1000123456789");
+    expect(sent?.bankId).toBe(946);
+    const escrow = await prisma.escrow.findUniqueOrThrow({ where: { subOrderId: subOrder.id }, include: { payout: true } });
+    expect(escrow.payout?.status).toBe("IN_TRANSIT");
+    await booksBalance();
+    // A second run must not pay the same escrow again.
+    const again = transfersSent.length;
+    await transferPendingPayouts(gateway, new Date());
+    expect(transfersSent.slice(again).some((transfer) => transfer.reference === escrow.payout?.reference)).toBe(false);
+
+    await reconcilePayouts(gateway, new Date(Date.now() + 5 * 60_000));
+    expect((await prisma.payout.findUniqueOrThrow({ where: { id: escrow.payoutId ?? "" } })).status).toBe("PAID");
+    await booksBalance();
+  });
+
+  it("refunds a payment that arrives after the order was cancelled", async () => {
+    const order = await placeOrder({
+      cart: await (async () => {
+        const cart = await getOrCreateCart({ userId: ids.buyer });
+        await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
+        await addToCart(cart.id, { listingId: ids.digital, quantity: 1 });
+        return getOrCreateCart({ userId: ids.buyer });
+      })(),
+      currency: "ETB",
+      buyerId: ids.buyer,
+      address: null,
+      destinationCountry: null,
+      taxCountry: "ET",
+      now: new Date(),
+    });
+    const { checkoutUrl } = await startCheckout(gateway, order.id, urls, new Date());
+    const txRef = checkoutUrl.split("/").pop() ?? "";
+    await prisma.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
+    charges.set(txRef, { status: "success", amount: order.grandTotal, currency: "ETB", reference: `CH${txRef}`, method: "cbebirr", paidAt: new Date() });
+    const before = refundsSent.length;
+    expect(await confirmPayment(gateway, txRef, new Date())).toBe("refunded");
+    expect(refundsSent.slice(before).map((refund) => refund.amount)).toEqual([order.grandTotal]);
+    expect((await prisma.payment.findUniqueOrThrow({ where: { providerRef: txRef } })).status).toBe("REFUNDED");
+    // Confirming again must not send a second refund.
+    expect(await confirmPayment(gateway, txRef, new Date())).toBe("refunded");
+    expect(refundsSent.length).toBe(before + 1);
+  });
 });
 
 describe("services, disputes and referrals", () => {
@@ -184,9 +258,7 @@ describe("services, disputes and referrals", () => {
     await addToCart(cart.id, { listingId: ids.service, serviceTierId: ids.tier, quantity: 1 });
     const order = await placeOrder({ cart: await getOrCreateCart({ userId: ids.buyer }), currency: "ETB", buyerId: ids.buyer, address: null, destinationCountry: null, taxCountry: "ET", now: new Date() });
     expect(await attributeOrder(order.id, ids.buyer, affiliateCode)).toBe(true);
-    const intent = `pi_${run}_${order.id}`;
-    await prisma.payment.create({ data: { orderId: order.id, stripePaymentIntentId: intent, amount: order.grandTotal, currency: "ETB", status: "PROCESSING" } });
-    expect(await completeOrderPayment({ orderId: order.id, paymentIntentId: intent, chargeId: null, amount: order.grandTotal, currency: "ETB", paidAt: new Date() })).toBe("completed");
+    await pay(order.id);
 
     const item = await prisma.orderItem.findFirstOrThrow({ where: { subOrder: { orderId: order.id } }, include: { milestones: true } });
     expect(item.milestones[0]?.status).toBe("FUNDED");
@@ -196,7 +268,7 @@ describe("services, disputes and referrals", () => {
     const disputeId = await openDispute(ids.buyer, { subOrderId: item.subOrderId, orderItemId: item.id, reason: "QUALITY", description: "The concepts do not follow the brief at all.", attachments: [] }, new Date());
     expect((await prisma.escrow.findUniqueOrThrow({ where: { subOrderId: item.subOrderId } })).status).toBe("FROZEN");
     await postDisputeMessage(ids.servicesSeller, false, disputeId, { body: "I can refund part of it.", attachments: [], proposal: 200_000 }, new Date());
-    await acceptDisputeProposal(stripe, ids.buyer, disputeId, new Date());
+    await acceptDisputeProposal(gateway, ids.buyer, disputeId, new Date());
     const dispute = await prisma.dispute.findUniqueOrThrow({ where: { id: disputeId } });
     expect(dispute.status).toBe("RESOLVED_SPLIT");
     const escrow = await prisma.escrow.findUniqueOrThrow({ where: { subOrderId: item.subOrderId } });
@@ -216,9 +288,7 @@ describe("services, disputes and referrals", () => {
     await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
     await addToCart(cart.id, { listingId: ids.service, serviceTierId: ids.tier, quantity: 1 });
     const order = await placeOrder({ cart: await getOrCreateCart({ userId: ids.buyer }), currency: "ETB", buyerId: ids.buyer, address: null, destinationCountry: null, taxCountry: "ET", now: new Date() });
-    const intent = `pi_${run}_${order.id}`;
-    await prisma.payment.create({ data: { orderId: order.id, stripePaymentIntentId: intent, amount: order.grandTotal, currency: "ETB", status: "PROCESSING" } });
-    await completeOrderPayment({ orderId: order.id, paymentIntentId: intent, chargeId: null, amount: order.grandTotal, currency: "ETB", paidAt: new Date() });
+    await pay(order.id);
     const item = await prisma.orderItem.findFirstOrThrow({ where: { subOrder: { orderId: order.id } } });
     await startWork(ids.servicesSeller, item.id, new Date());
     await submitDelivery(ids.servicesSeller, item.id, { message: "Final files", files: [] }, new Date());

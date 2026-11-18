@@ -1,4 +1,4 @@
-import type Stripe from "stripe";
+import type { PaymentGateway } from "./gateway";
 import { prisma, type DisputeParty, type DisputeReason, type DisputeStatus } from "@marketplace/database";
 import { DISPUTE_REASONS, DISPUTE_RESPONSE_DAYS, isDisputeReason, screenMessage } from "@marketplace/shared-types";
 import { CheckoutError } from "./errors";
@@ -212,7 +212,7 @@ function refundRequest(dispute: LoadedDispute, amount: number, key: string, reas
 }
 
 /** The buyer accepts the seller's latest refund offer. */
-export async function acceptDisputeProposal(stripe: Stripe | null, buyerId: string, disputeId: string, now: Date): Promise<void> {
+export async function acceptDisputeProposal(gateway: PaymentGateway | null, buyerId: string, disputeId: string, now: Date): Promise<void> {
   const { dispute, party } = await disputeAccess(buyerId, disputeId, false);
   if (party !== "BUYER") throw new CheckoutError("Only the buyer can accept an offer.");
   if (!isOpen(dispute.status)) throw new CheckoutError("This case is closed.");
@@ -221,7 +221,7 @@ export async function acceptDisputeProposal(stripe: Stripe | null, buyerId: stri
   if (amount === null) throw new CheckoutError("The seller has not offered a refund.");
   const remaining = dispute.subOrder.grandTotal - dispute.subOrder.refundedTotal;
   const applied = Math.min(amount, remaining);
-  await refundSubOrder(stripe, refundRequest(dispute, applied, `dispute:${dispute.id}`, `Dispute ${dispute.id} settled by agreement`), now);
+  await refundSubOrder(gateway, refundRequest(dispute, applied, `dispute:${dispute.id}`, `Dispute ${dispute.id} settled by agreement`), now);
   const full = applied >= remaining;
   await finish(dispute, full ? "RESOLVED_BUYER" : "RESOLVED_SPLIT", `Settled by agreement: ${displayAmount(applied, dispute.subOrder.currency)} refunded to the buyer.`, applied, null, now);
   if (!full) await settleRemainder(dispute.subOrderId, now, "dispute settled by agreement");
@@ -255,7 +255,7 @@ export async function withdrawDispute(buyerId: string, disputeId: string, now: D
 }
 
 /** Staff decision: refund anything from nothing up to what is left of the sub-order. */
-export async function resolveDispute(stripe: Stripe | null, staffId: string, disputeId: string, input: { refundAmount: number; note: string }, now: Date): Promise<void> {
+export async function resolveDispute(gateway: PaymentGateway | null, staffId: string, disputeId: string, input: { refundAmount: number; note: string }, now: Date): Promise<void> {
   const { dispute } = await disputeAccess(staffId, disputeId, true);
   if (dispute.kind !== "CLAIM") throw new CheckoutError("Card disputes are decided by the bank; submit evidence instead.");
   if (!isOpen(dispute.status)) throw new CheckoutError("This case is closed.");
@@ -266,7 +266,7 @@ export async function resolveDispute(stripe: Stripe | null, staffId: string, dis
     throw new CheckoutError(`Refund between 0 and ${displayAmount(remaining, dispute.subOrder.currency)}.`);
   }
   await prisma.disputeMessage.create({ data: { disputeId, authorId: staffId, party: "STAFF", body: note.slice(0, 5_000), createdAt: now } });
-  if (input.refundAmount > 0) await refundSubOrder(stripe, refundRequest(dispute, input.refundAmount, `dispute:${dispute.id}`, `Dispute ${dispute.id} decided by staff`), now);
+  if (input.refundAmount > 0) await refundSubOrder(gateway, refundRequest(dispute, input.refundAmount, `dispute:${dispute.id}`, `Dispute ${dispute.id} decided by staff`), now);
   const status: DisputeStatus = input.refundAmount === 0 ? "RESOLVED_SELLER" : input.refundAmount >= remaining ? "RESOLVED_BUYER" : "RESOLVED_SPLIT";
   await finish(dispute, status, note, input.refundAmount, staffId, now);
   if (input.refundAmount < remaining) await settleRemainder(dispute.subOrderId, now, "dispute decided by staff");
@@ -318,7 +318,7 @@ const CHARGEBACK_REASONS: Record<string, DisputeReason> = {
 
 export interface ChargebackOpened {
   orderId: string;
-  stripeDisputeId: string;
+  providerCaseId: string;
   reason: string;
   amount: number;
   currency: string;
@@ -332,7 +332,7 @@ export async function recordChargeback(input: ChargebackOpened, now: Date): Prom
   const description = `The card holder disputed the payment with their bank (${input.reason.replace(/_/g, " ")}), ${displayAmount(input.amount, input.currency)}.`;
   for (const subOrder of order.subOrders) {
     await prisma.$transaction(async (tx) => {
-      const existing = await tx.dispute.findUnique({ where: { stripeDisputeId_subOrderId: { stripeDisputeId: input.stripeDisputeId, subOrderId: subOrder.id } }, select: { id: true } });
+      const existing = await tx.dispute.findUnique({ where: { providerCaseId_subOrderId: { providerCaseId: input.providerCaseId, subOrderId: subOrder.id } }, select: { id: true } });
       if (existing) {
         await tx.dispute.update({ where: { id: existing.id }, data: { evidenceDueBy: input.evidenceDueBy } });
         return;
@@ -340,7 +340,7 @@ export async function recordChargeback(input: ChargebackOpened, now: Date): Prom
       await tx.dispute.create({
         data: {
           kind: "CHARGEBACK",
-          stripeDisputeId: input.stripeDisputeId,
+          providerCaseId: input.providerCaseId,
           subOrderId: subOrder.id,
           openedById: order.buyerId,
           reason,
@@ -350,7 +350,7 @@ export async function recordChargeback(input: ChargebackOpened, now: Date): Prom
           messages: { create: { party: "SYSTEM", body: description, createdAt: now } },
         },
       });
-      await freezeSubOrderEscrow(tx, subOrder.id, `Chargeback ${input.stripeDisputeId}`, now);
+      await freezeSubOrderEscrow(tx, subOrder.id, `Chargeback ${input.providerCaseId}`, now);
     });
   }
   const sellers = await prisma.subOrder.findMany({ where: { orderId: input.orderId }, select: { store: { select: { sellerId: true } } } });
@@ -368,9 +368,9 @@ export async function recordChargeback(input: ChargebackOpened, now: Date): Prom
 }
 
 /** The bank's decision. Lost: the money already left, so the buyer's share is taken back from escrow (or booked as a loss to recover). */
-export async function closeChargeback(input: { stripeDisputeId: string; outcome: string; amount: number }, now: Date): Promise<void> {
+export async function closeChargeback(input: { providerCaseId: string; outcome: string; amount: number }, now: Date): Promise<void> {
   const disputes = await prisma.dispute.findMany({
-    where: { stripeDisputeId: input.stripeDisputeId, kind: "CHARGEBACK", status: { in: [...OPEN] } },
+    where: { providerCaseId: input.providerCaseId, kind: "CHARGEBACK", status: { in: [...OPEN] } },
     select: { id: true },
   });
   const loaded = (await Promise.all(disputes.map((row) => loadDispute(row.id)))).filter((row): row is LoadedDispute => row !== null);
@@ -392,15 +392,15 @@ export async function closeChargeback(input: { stripeDisputeId: string; outcome:
     const share = shares[index] ?? 0;
     const escrow = await prisma.escrow.findUnique({ where: { subOrderId: dispute.subOrderId }, select: { status: true } });
     if (share > 0 && escrow && (escrow.status === "HELD" || escrow.status === "FROZEN")) {
-      await refundSubOrder(null, refundRequest(dispute, share, `chargeback:${input.stripeDisputeId}:${dispute.subOrderId}`, `Chargeback ${input.stripeDisputeId} lost`, true), now);
+      await refundSubOrder(null, refundRequest(dispute, share, `chargeback:${input.providerCaseId}:${dispute.subOrderId}`, `Chargeback ${input.providerCaseId} lost`, true), now);
     } else if (share > 0) {
       // The seller was already paid: the platform carries the loss until it is recovered.
       await prisma.$transaction(async (tx) => {
         await postEntry(tx, {
-          idempotencyKey: `chargeback-loss:${input.stripeDisputeId}:${dispute.subOrderId}`,
-          description: `Chargeback ${input.stripeDisputeId} lost after payout for sub-order ${dispute.subOrderId}`,
+          idempotencyKey: `chargeback-loss:${input.providerCaseId}:${dispute.subOrderId}`,
+          description: `Chargeback ${input.providerCaseId} lost after payout for sub-order ${dispute.subOrderId}`,
           occurredAt: now,
-          metadata: { subOrderId: dispute.subOrderId, stripeDisputeId: input.stripeDisputeId, recoverFromStore: true },
+          metadata: { subOrderId: dispute.subOrderId, providerCaseId: input.providerCaseId, recoverFromStore: true },
           lines: [
             { account: accounts.chargebacks(dispute.subOrder.currency), direction: "DEBIT", amount: share },
             { account: accounts.cash(dispute.subOrder.currency), direction: "CREDIT", amount: share },

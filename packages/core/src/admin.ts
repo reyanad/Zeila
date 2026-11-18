@@ -191,7 +191,7 @@ export async function escrowReconciliation(): Promise<ReconciliationRow[]> {
     prisma.$queryRaw<Array<{ currency: string; total: bigint | null }>>`
       SELECT s."currency" AS currency, SUM(e."released") AS total
       FROM "Escrow" e JOIN "SubOrder" s ON s."id" = e."subOrderId"
-      WHERE e."status" = 'RELEASED' AND e."stripeTransferId" IS NULL
+      WHERE e."status" = 'RELEASED' AND e."payoutId" IS NULL
       GROUP BY 1`,
   ]);
   const currencies = new Set([...ledger.map((row) => row.currency), ...held.map((row) => row.currency), ...released.map((row) => row.currency)]);

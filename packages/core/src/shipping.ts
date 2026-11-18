@@ -1,4 +1,4 @@
-import type Stripe from "stripe";
+import type { PaymentGateway } from "./gateway";
 import { prisma, type Prisma } from "@marketplace/database";
 import { isCarrierCode, trackingUrl } from "@marketplace/shared-types";
 import { sellerSubOrderId } from "./access";
@@ -97,7 +97,7 @@ export async function addTrackingEvent(sellerUserId: string, shipmentId: string,
 }
 
 /** Seller cannot fulfil: full refund to the buyer and stock back on the shelf. Only before shipping. */
-export async function cancelBySeller(stripe: Stripe | null, sellerUserId: string, subOrderId: string, reason: string, now: Date): Promise<void> {
+export async function cancelBySeller(gateway: PaymentGateway | null, sellerUserId: string, subOrderId: string, reason: string, now: Date): Promise<void> {
   const subOrder = await sellerSubOrderId(sellerUserId, subOrderId);
   if (!["PAID", "PROCESSING"].includes(subOrder.status)) throw new CheckoutError("Orders can only be cancelled before anything is shipped or delivered.");
   const details = await prisma.subOrder.findUniqueOrThrow({
@@ -108,7 +108,7 @@ export async function cancelBySeller(stripe: Stripe | null, sellerUserId: string
     throw new CheckoutError("Part of this order is already delivered or in progress.");
   }
   await refundSubOrder(
-    stripe,
+    gateway,
     {
       subOrderId: subOrder.id,
       amount: details.grandTotal - details.refundedTotal,

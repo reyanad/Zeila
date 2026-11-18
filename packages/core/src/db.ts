@@ -1,0 +1,4 @@
+/** True for a unique-constraint violation (Prisma P2002). */
+export function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "P2002";
+}

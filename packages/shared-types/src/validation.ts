@@ -4,7 +4,7 @@
  */
 import { z } from "zod";
 import { isCountryCode } from "./countries";
-import { SUPPORTED_CURRENCIES } from "./money";
+import { STORE_CURRENCIES, SUPPORTED_CURRENCIES } from "./money";
 
 // ---------------------------------------------------------------------------
 // Primitives
@@ -105,7 +105,7 @@ export const createStoreSchema = z.object({
     .regex(STORE_SLUG_PATTERN, "Use 3-40 lowercase letters, numbers or hyphens")
     .refine((slug) => !RESERVED_STORE_SLUGS.has(slug), "That store address is reserved"),
   country: countryCodeSchema,
-  currency: currencyCodeSchema,
+  currency: z.enum(STORE_CURRENCIES, "Stores sell in Ethiopian birr (ETB)"),
   tagline: z.string().trim().max(120, "Tagline is too long").optional().default(""),
 });
 export type CreateStoreInput = z.infer<typeof createStoreSchema>;
@@ -209,3 +209,22 @@ export const fxRatesSchema = z.object({
   rates: z.partialRecord(currencyCodeSchema, z.number().positive()),
   fetchedAt: z.iso.datetime(),
 });
+
+// ---------------------------------------------------------------------------
+// Seller payout account (Chapa transfers)
+// ---------------------------------------------------------------------------
+
+const accountDigits = z
+  .string()
+  .transform((value) => value.replace(/[\s-]/g, ""))
+  .pipe(z.string().regex(/^\d{6,20}$/, "Use digits only: the account number, or the phone number for a wallet"));
+
+export const payoutAccountSchema = z
+  .object({
+    bankId: z.coerce.number("Choose your bank or wallet").int().positive("Choose your bank or wallet"),
+    accountName: z.string().trim().min(3, "Enter the name on the account").max(100, "Name is too long"),
+    accountNumber: accountDigits,
+    confirmAccountNumber: accountDigits,
+  })
+  .refine((value) => value.accountNumber === value.confirmAccountNumber, { path: ["confirmAccountNumber"], message: "The two numbers do not match" });
+export type PayoutAccountInput = z.infer<typeof payoutAccountSchema>;

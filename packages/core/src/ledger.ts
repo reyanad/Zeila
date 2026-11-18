@@ -9,12 +9,12 @@ import { prisma, type LedgerAccountType, type Prisma } from "@marketplace/databa
  * event (e.g. "order-paid:<orderId>"), so replays cannot double-post.
  *
  * Chart of accounts (one per currency):
- *   platform:cash:<CUR>              ASSET      money in the platform's Stripe balance
+ *   platform:cash:<CUR>              ASSET      money in the platform's Chapa balance
  *   platform:fees:<CUR>              INCOME     commission earned
  *   platform:promotions:<CUR>        EXPENSE    platform-funded discounts
  *   platform:refunds:<CUR>           EXPENSE    refunds the platform absorbs
  *   store:<id>:escrow:<CUR>          LIABILITY  owed to a store, held until release
- *   store:<id>:payable:<CUR>         LIABILITY  released, waiting for the Stripe transfer
+ *   store:<id>:payable:<CUR>         LIABILITY  released, waiting for the Chapa transfer
  */
 
 export interface AccountRef {

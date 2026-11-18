@@ -1,17 +1,19 @@
-import type Stripe from "stripe";
+import { randomBytes } from "node:crypto";
 import { prisma } from "@marketplace/database";
 import { CheckoutError } from "./errors";
+import { decryptAtRest } from "./field-crypto";
+import type { PaymentGateway } from "./gateway";
 import { rollupOrderStatus } from "./fulfillment";
 import { accounts, postEntry } from "./ledger";
-import { displayAmount, notifySubOrder } from "./notifications";
+import { displayAmount, notify, notifySubOrder } from "./notifications";
 
 /**
  * Escrow lifecycle per sub-order:
- *   HELD ──release──▶ RELEASED ──transfer──▶ (stripeTransferId set)
+ *   HELD ──release──▶ RELEASED ──Chapa transfer──▶ (payoutId set; Payout PAID when it lands)
  *   HELD ──chargeback/dispute──▶ FROZEN ──resolution──▶ HELD | REFUNDED
  *
  * Release moves the store's money from escrow to payable in the ledger; the
- * Stripe transfer to the connected account then settles payable against cash.
+ * Chapa transfer to the seller's bank or wallet then settles payable against cash.
  */
 
 const OPEN_DISPUTES = ["OPEN", "AWAITING_SELLER", "AWAITING_BUYER", "UNDER_REVIEW"] as const;
@@ -83,14 +85,30 @@ export async function releaseEligibleEscrows(now: Date, limit = 200): Promise<nu
   return released;
 }
 
+const PAYOUT_FAILURE_LIMIT = 3;
+
+class PayoutSkipped extends Error {}
+
+function payoutReference(): string {
+  return `po-${randomBytes(9).toString("hex")}`;
+}
+
 /**
- * Transfer released escrow to sellers' connected accounts. The charge may
- * have settled in another currency (e.g. ETB charged, USD balance); the
- * transfer uses the settlement currency, in proportion to the charge.
+ * Pay released escrow to sellers by Chapa transfer, one transfer per released
+ * sub-order. Payout row, escrow link and ledger entry (payable -> cash) are
+ * written together before Chapa is called, so the books always show money
+ * that is committed to leave; if Chapa refuses, the entry is reversed and the
+ * escrow becomes payable again. Run every few minutes.
  */
-export async function transferPendingPayouts(stripe: Stripe, limit = 100): Promise<number> {
+export async function transferPendingPayouts(gateway: PaymentGateway, now: Date, limit = 100): Promise<number> {
   const pending = await prisma.escrow.findMany({
-    where: { status: "RELEASED", stripeTransferId: null, released: { gt: 0 }, subOrder: { store: { payoutsEnabled: true, stripeAccountId: { not: null } } } },
+    where: {
+      status: "RELEASED",
+      payoutId: null,
+      released: { gt: 0 },
+      subOrder: { store: { payoutsEnabled: true, payoutBankId: { not: null }, payoutAccountNumber: { not: null }, payoutAccountName: { not: null } } },
+    },
+    orderBy: { releasedAt: "asc" },
     take: limit,
     select: {
       id: true,
@@ -100,59 +118,169 @@ export async function transferPendingPayouts(stripe: Stripe, limit = 100): Promi
           id: true,
           currency: true,
           storeId: true,
-          orderId: true,
-          store: { select: { stripeAccountId: true } },
-          order: { select: { payments: { where: { status: { in: ["SUCCEEDED", "PARTIALLY_REFUNDED"] } }, select: { stripeChargeId: true }, take: 1 } } },
+          store: { select: { payoutBankId: true, payoutBankName: true, payoutAccountName: true, payoutAccountNumber: true, payoutAccountLast4: true } },
         },
       },
     },
   });
 
-  let transferred = 0;
+  let queued = 0;
   for (const escrow of pending) {
     const { subOrder } = escrow;
-    const chargeId = subOrder.order.payments[0]?.stripeChargeId;
-    const destination = subOrder.store.stripeAccountId;
-    if (!chargeId || !destination) continue;
+    const { store } = subOrder;
+    if (!store.payoutBankId || !store.payoutAccountNumber || !store.payoutAccountName) continue;
+    let accountNumber: string;
     try {
-      const charge = await stripe.charges.retrieve(chargeId, { expand: ["balance_transaction"] });
-      const balance = charge.balance_transaction;
-      if (!balance || typeof balance === "string") throw new Error(`Charge ${chargeId} has no balance transaction yet`);
-      const amount = Math.floor((escrow.released * balance.amount) / charge.amount);
-      if (amount <= 0) continue;
+      accountNumber = decryptAtRest(store.payoutAccountNumber);
+    } catch (error) {
+      console.error(`[payouts] cannot read the payout account of store ${subOrder.storeId}`, error);
+      continue;
+    }
 
-      const transfer = await stripe.transfers.create(
-        {
-          amount,
-          currency: balance.currency,
-          destination,
-          transfer_group: subOrder.orderId,
-          source_transaction: chargeId,
-          metadata: { escrowId: escrow.id, subOrderId: subOrder.id },
-        },
-        { idempotencyKey: `escrow-transfer-${escrow.id}` },
-      );
-
-      await prisma.$transaction(async (tx) => {
-        const marked = await tx.escrow.updateMany({ where: { id: escrow.id, stripeTransferId: null }, data: { stripeTransferId: transfer.id } });
-        if (marked.count === 0) return;
+    const reference = payoutReference();
+    let payoutId: string;
+    try {
+      payoutId = await prisma.$transaction(async (tx) => {
+        const payout = await tx.payout.create({
+          data: {
+            storeId: subOrder.storeId,
+            amount: escrow.released,
+            currency: subOrder.currency,
+            status: "PENDING",
+            reference,
+            bankName: store.payoutBankName,
+            accountLast4: store.payoutAccountLast4,
+          },
+          select: { id: true },
+        });
+        const linked = await tx.escrow.updateMany({ where: { id: escrow.id, status: "RELEASED", payoutId: null }, data: { payoutId: payout.id } });
+        if (linked.count === 0) throw new PayoutSkipped();
         await postEntry(tx, {
-          idempotencyKey: `escrow-transfer:${escrow.id}`,
-          description: `Transfer ${transfer.id} to store ${subOrder.storeId}`,
-          occurredAt: new Date(),
-          metadata: { escrowId: escrow.id, transferId: transfer.id, settlementAmount: amount, settlementCurrency: balance.currency },
+          idempotencyKey: `payout:${reference}`,
+          description: `Chapa transfer ${reference} to store ${subOrder.storeId}`,
+          occurredAt: now,
+          metadata: { escrowId: escrow.id, subOrderId: subOrder.id, payoutId: payout.id, reference },
           lines: [
             { account: accounts.payable(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: escrow.released },
             { account: accounts.cash(subOrder.currency), direction: "CREDIT", amount: escrow.released },
           ],
         });
+        return payout.id;
       });
-      transferred += 1;
     } catch (error) {
-      console.error(`[escrow] transfer for ${escrow.id} failed`, error);
+      if (error instanceof PayoutSkipped) continue;
+      console.error(`[payouts] could not prepare the payout for escrow ${escrow.id}`, error);
+      continue;
+    }
+
+    try {
+      const result = await gateway.transfer({
+        reference,
+        amount: escrow.released,
+        currency: subOrder.currency,
+        bankId: store.payoutBankId,
+        accountName: store.payoutAccountName,
+        accountNumber,
+      });
+      if (result.kind === "queued") {
+        await prisma.payout.update({ where: { id: payoutId }, data: { status: "IN_TRANSIT", providerTransferId: result.transferId } });
+        queued += 1;
+      } else {
+        await failPayout(payoutId, `Chapa refused the transfer: ${result.message}`, !result.retryable, now);
+      }
+    } catch (error) {
+      // Unknown outcome: the payout stays PENDING and reconcilePayouts asks Chapa about it.
+      console.error(`[payouts] transfer ${reference} did not complete`, error);
     }
   }
-  return transferred;
+  return queued;
+}
+
+/**
+ * A transfer did not happen: reverse its ledger entry and make the escrow
+ * payable again so the next run retries it. After repeated failures (or a
+ * refusal that points at the account details) the store's payouts are paused
+ * until the seller checks their payout account.
+ */
+async function failPayout(payoutId: string, reason: string, accountProblem: boolean, now: Date): Promise<void> {
+  const outcome = await prisma.$transaction(async (tx) => {
+    const payout = await tx.payout.findUnique({ where: { id: payoutId }, select: { id: true, status: true, reference: true, storeId: true, amount: true, currency: true } });
+    if (!payout || (payout.status !== "PENDING" && payout.status !== "IN_TRANSIT")) return null;
+    await tx.payout.update({ where: { id: payout.id }, data: { status: "FAILED", failureReason: reason.slice(0, 500) } });
+    await postEntry(tx, {
+      idempotencyKey: `payout-reversal:${payout.reference}`,
+      description: `Chapa transfer ${payout.reference} failed; money is payable to the store again`,
+      occurredAt: now,
+      metadata: { payoutId: payout.id, reason: reason.slice(0, 300) },
+      lines: [
+        { account: accounts.cash(payout.currency), direction: "DEBIT", amount: payout.amount },
+        { account: accounts.payable(payout.storeId, payout.currency), direction: "CREDIT", amount: payout.amount },
+      ],
+    });
+    await tx.escrow.updateMany({ where: { payoutId: payout.id }, data: { payoutId: null } });
+    const recentFailures = await tx.payout.count({ where: { storeId: payout.storeId, status: "FAILED", updatedAt: { gte: new Date(now.getTime() - 86_400_000) } } });
+    const pause = accountProblem || recentFailures >= PAYOUT_FAILURE_LIMIT;
+    if (pause) await tx.store.update({ where: { id: payout.storeId }, data: { payoutsEnabled: false } });
+    const store = await tx.store.findUniqueOrThrow({ where: { id: payout.storeId }, select: { sellerId: true } });
+    return { pause, sellerId: store.sellerId };
+  });
+  if (outcome?.pause) {
+    await notify({
+      userId: outcome.sellerId,
+      type: "PAYOUT_SENT",
+      title: "Your payout could not be sent",
+      body: "Chapa could not deliver your earnings to the account on file. Check your payout account in Seller setup; your money stays safe on Zeila until then.",
+      href: "/seller/onboarding",
+    });
+  }
+}
+
+async function markPayoutPaid(payoutId: string, now: Date): Promise<void> {
+  const payout = await prisma.payout.findUnique({ where: { id: payoutId }, select: { id: true, status: true, amount: true, currency: true, bankName: true, accountLast4: true, store: { select: { sellerId: true } } } });
+  if (!payout || (payout.status !== "PENDING" && payout.status !== "IN_TRANSIT")) return;
+  const marked = await prisma.payout.updateMany({ where: { id: payout.id, status: { in: ["PENDING", "IN_TRANSIT"] } }, data: { status: "PAID", paidAt: now, arrivalAt: now } });
+  if (marked.count === 0) return;
+  const destination = [payout.bankName, payout.accountLast4 ? `ending ${payout.accountLast4}` : null].filter(Boolean).join(" ");
+  await notify({
+    userId: payout.store.sellerId,
+    type: "PAYOUT_SENT",
+    title: `Payout sent: ${displayAmount(payout.amount, payout.currency)}`,
+    body: destination ? `Sent to ${destination}.` : "Sent to your payout account.",
+    href: "/seller/studio/analytics",
+  });
+}
+
+/** Ask Chapa about one transfer and apply the answer. Used by the sweep and by payout webhooks. */
+export async function refreshPayout(gateway: PaymentGateway, reference: string, now: Date): Promise<void> {
+  const payout = await prisma.payout.findUnique({ where: { reference }, select: { id: true, status: true, createdAt: true } });
+  if (!payout || (payout.status !== "PENDING" && payout.status !== "IN_TRANSIT")) return;
+  const result = await gateway.verifyTransfer(reference);
+  if (result.status === "success") await markPayoutPaid(payout.id, now);
+  else if (result.status === "failed") await failPayout(payout.id, `Chapa reported the transfer failed${result.message ? `: ${result.message}` : ""}`, false, now);
+  else if (result.status === "not_found" && payout.status === "PENDING" && now.getTime() - payout.createdAt.getTime() > 10 * 60_000) {
+    // Chapa never received it: undo and let the next run send a fresh transfer.
+    await failPayout(payout.id, "Chapa has no record of this transfer", false, now);
+  }
+}
+
+/** Follow transfers that are queued or whose outcome was unknown. Run every few minutes. */
+export async function reconcilePayouts(gateway: PaymentGateway, now: Date, limit = 100): Promise<number> {
+  const open = await prisma.payout.findMany({
+    where: { status: { in: ["PENDING", "IN_TRANSIT"] }, updatedAt: { lt: new Date(now.getTime() - 2 * 60_000) } },
+    orderBy: { updatedAt: "asc" },
+    take: limit,
+    select: { reference: true },
+  });
+  let checked = 0;
+  for (const payout of open) {
+    try {
+      await refreshPayout(gateway, payout.reference, now);
+      checked += 1;
+    } catch (error) {
+      console.error(`[payouts] could not check transfer ${payout.reference}`, error);
+    }
+  }
+  return checked;
 }
 
 /** Chargeback or dispute: stop any money leaving for this order. */

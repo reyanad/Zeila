@@ -1,4 +1,4 @@
-import type Stripe from "stripe";
+import type { PaymentGateway } from "./gateway";
 import { prisma } from "@marketplace/database";
 import { isReturnReason, RETURN_REASONS } from "@marketplace/shared-types";
 import { orderItemForUser, sellerSubOrderId } from "./access";
@@ -76,12 +76,12 @@ export async function submitReturnTracking(buyerId: string, rmaId: string, track
 }
 
 /** Seller received the goods back (or refunds without a return): refund and optionally restock. */
-export async function completeReturn(stripe: Stripe | null, sellerUserId: string, rmaId: string, input: { refundAmount: number; restock: boolean }, now: Date): Promise<void> {
+export async function completeReturn(gateway: PaymentGateway | null, sellerUserId: string, rmaId: string, input: { refundAmount: number; restock: boolean }, now: Date): Promise<void> {
   const rma = await sellerRma(sellerUserId, rmaId);
   if (!["APPROVED", "AWAITING_RETURN", "RECEIVED"].includes(rma.status)) throw new CheckoutError("This return cannot be refunded in its current state.");
   const fullItem = rma.quantity === rma.orderItem.quantity;
   await refundSubOrder(
-    stripe,
+    gateway,
     {
       subOrderId: rma.orderItem.subOrderId,
       amount: input.refundAmount,

@@ -1,6 +1,8 @@
-import type Stripe from "stripe";
+import { createHash } from "node:crypto";
 import { prisma, type Prisma } from "@marketplace/database";
+import { isUniqueViolation } from "./db";
 import { CheckoutError } from "./errors";
+import { GatewayError, type PaymentGateway } from "./gateway";
 import { rollupOrderStatus, settleSubOrder } from "./fulfillment";
 import { accounts, postEntry } from "./ledger";
 import { displayAmount, notifySubOrder } from "./notifications";
@@ -43,7 +45,7 @@ export interface RefundRequest {
   restock: Array<{ orderItemId: string; quantity: number }>;
   /**
    * The money already went back to the buyer outside our refund call (a lost
-   * chargeback): record it without asking Stripe for a refund.
+   * chargeback): record it without asking the payment provider for a refund.
    */
   external?: boolean;
 }
@@ -54,7 +56,80 @@ function promoFunding(metadata: Prisma.JsonValue): "store" | "platform" | null {
   return fundedBy === "store" || fundedBy === "platform" ? fundedBy : null;
 }
 
-export async function refundSubOrder(stripe: Stripe | null, request: RefundRequest, now: Date): Promise<void> {
+/** Stable Chapa refund reference for a business event (Chapa references must be unique per business). */
+export function refundReference(idempotencyKey: string): string {
+  return `rf-${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 24)}`;
+}
+
+const DUPLICATE_REFERENCE = /reference|duplicate|already/i;
+
+interface RefundablePayment {
+  id: string;
+  providerRef: string;
+}
+
+/**
+ * Ask Chapa to refund `amount` of a payment, once per business event. The
+ * Refund row is written before the call so concurrent or repeated requests
+ * for the same event never send two refunds; a failed request may be retried.
+ */
+export async function requestProviderRefund(
+  gateway: PaymentGateway,
+  payment: RefundablePayment,
+  input: { idempotencyKey: string; amount: number; currency: string; reason: string },
+): Promise<{ id: string; reference: string }> {
+  const reference = refundReference(input.idempotencyKey);
+  const select = { id: true, reference: true, requestReference: true, status: true, providerRefundId: true } as const;
+  let row = await prisma.refund.findUnique({ where: { reference }, select });
+  if (row && row.status !== "FAILED" && !(row.status === "REQUESTED" && !row.providerRefundId)) return row;
+
+  if (!row) {
+    try {
+      row = await prisma.refund.create({
+        data: { paymentId: payment.id, reference, requestReference: reference, amount: input.amount, reason: input.reason.slice(0, 500), status: "REQUESTED" },
+        select,
+      });
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      throw new CheckoutError("This refund is already being processed. Check again in a minute.");
+    }
+  } else if (row.status === "FAILED") {
+    // A refused request may be retried, under a new reference for Chapa.
+    row = await prisma.refund.update({
+      where: { id: row.id },
+      data: { status: "REQUESTED", requestReference: `${reference}-${Date.now().toString(36)}`, amount: input.amount, failureReason: null },
+      select,
+    });
+  }
+
+  try {
+    const result = await gateway.refund({ txRef: payment.providerRef, amount: input.amount, currency: input.currency, reference: row.requestReference, reason: input.reason });
+    await prisma.refund.update({ where: { id: row.id }, data: { providerRefundId: result.refundId, status: result.state === "REFUNDED" ? "REFUNDED" : "PROCESSING" } });
+  } catch (error) {
+    if (error instanceof GatewayError && error.httpStatus !== null && error.httpStatus < 500) {
+      if (row.requestReference === reference && DUPLICATE_REFERENCE.test(error.message) && row.status === "REQUESTED") {
+        // An earlier attempt with this reference reached Chapa; treat it as accepted.
+        await prisma.refund.update({ where: { id: row.id }, data: { status: "PROCESSING" } });
+        return row;
+      }
+      await prisma.refund.update({ where: { id: row.id }, data: { status: "FAILED", failureReason: error.message.slice(0, 500) } });
+      throw new CheckoutError(error.message);
+    }
+    // Outcome unknown (network): the row stays REQUESTED and the same reference is re-sent on retry.
+    throw error;
+  }
+  return row;
+}
+
+/** Recompute a payment's refund state from its refunds that did not fail. */
+async function syncPaymentRefundState(tx: Prisma.TransactionClient, payment: { id: string; amount: number }): Promise<void> {
+  const refunded = await tx.refund.aggregate({ where: { paymentId: payment.id, status: { notIn: ["FAILED", "REVERSED"] } }, _sum: { amount: true } });
+  const total = refunded._sum.amount ?? 0;
+  if (total <= 0) return;
+  await tx.payment.update({ where: { id: payment.id }, data: { status: total >= payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
+}
+
+export async function refundSubOrder(gateway: PaymentGateway | null, request: RefundRequest, now: Date): Promise<void> {
   const subOrder = await prisma.subOrder.findUnique({
     where: { id: request.subOrderId },
     select: {
@@ -70,7 +145,7 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
       platformFee: true,
       refundedTotal: true,
       escrow: { select: { id: true, status: true, amount: true, refunded: true } },
-      order: { select: { metadata: true, payments: { where: { status: { in: ["SUCCEEDED", "PARTIALLY_REFUNDED"] } }, select: { id: true, stripePaymentIntentId: true, amount: true }, take: 1 } } },
+      order: { select: { metadata: true, payments: { where: { status: { in: ["SUCCEEDED", "PARTIALLY_REFUNDED"] } }, select: { id: true, providerRef: true, amount: true }, take: 1 } } },
     },
   });
   if (!subOrder) throw new CheckoutError("That order does not exist.");
@@ -87,26 +162,20 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
   const split = refundSplit(subOrder.grandTotal, settlement.fee, settlement.platformDiscount, request.amount);
   const payment = subOrder.order.payments[0];
 
-  let stripeRefund: Stripe.Refund | null = null;
+  let providerRefund: { id: string; reference: string } | null = null;
   if (request.amount > 0 && !request.external) {
     if (!payment) throw new CheckoutError("No captured payment was found for this order.");
-    if (!stripe) throw new CheckoutError("Refunds need Stripe, which is not configured.");
-    stripeRefund = await stripe.refunds.create(
-      { payment_intent: payment.stripePaymentIntentId, amount: request.amount, metadata: { subOrderId: subOrder.id, reason: request.reason.slice(0, 400) } },
-      { idempotencyKey: `refund-${request.idempotencyKey}` },
-    );
+    if (!gateway) throw new CheckoutError("Refunds need Chapa, which is not configured yet.");
+    providerRefund = await requestProviderRefund(gateway, payment, {
+      idempotencyKey: request.idempotencyKey,
+      amount: request.amount,
+      currency: subOrder.currency,
+      reason: request.reason,
+    });
   }
 
   await prisma.$transaction(async (tx) => {
-    if (stripeRefund && payment) {
-      await tx.refund.upsert({
-        where: { stripeRefundId: stripeRefund.id },
-        create: { paymentId: payment.id, stripeRefundId: stripeRefund.id, amount: stripeRefund.amount, reason: request.reason.slice(0, 500) },
-        update: {},
-      });
-      const refunded = await tx.refund.aggregate({ where: { paymentId: payment.id }, _sum: { amount: true } });
-      await tx.payment.update({ where: { id: payment.id }, data: { status: (refunded._sum.amount ?? 0) >= payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED" } });
-    }
+    if (providerRefund && payment) await syncPaymentRefundState(tx, payment);
 
     const posted =
       request.amount > 0
@@ -114,7 +183,7 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
             idempotencyKey: `refund:${request.idempotencyKey}`,
             description: `Refund for sub-order ${subOrder.id}: ${request.reason.slice(0, 120)}`,
             occurredAt: now,
-            metadata: { subOrderId: subOrder.id, stripeRefundId: stripeRefund?.id ?? null },
+            metadata: { subOrderId: subOrder.id, refundReference: providerRefund?.reference ?? null },
             lines: [
               { account: accounts.escrow(subOrder.storeId, subOrder.currency), direction: "DEBIT", amount: split.escrowPart },
               { account: accounts.fees(subOrder.currency), direction: "DEBIT", amount: split.feePart },
@@ -156,7 +225,44 @@ export async function refundSubOrder(stripe: Stripe | null, request: RefundReque
     await notifySubOrder(subOrder.id, "buyer", {
       type: "REFUND_ISSUED",
       title: "Refund issued for order {order}",
-      body: `${displayAmount(request.amount, subOrder.currency)} is on its way back to your payment method. Banks usually show it within 5–10 days.`,
+      body: `${displayAmount(request.amount, subOrder.currency)} is on its way back to the account or wallet you paid with.`,
     });
   }
+}
+
+/**
+ * Follow refunds Chapa has accepted until they finish. A reversed refund means
+ * the money went back to the platform balance instead of the buyer; it is
+ * kept for staff to resolve with the buyer. Run every few minutes.
+ */
+export async function reconcileRefunds(gateway: PaymentGateway, limit = 100): Promise<{ refunded: number; reversed: number }> {
+  const open = await prisma.refund.findMany({
+    where: { status: "PROCESSING", providerRefundId: { not: null } },
+    orderBy: { createdAt: "asc" },
+    take: limit,
+    select: { id: true, providerRefundId: true, payment: { select: { id: true, amount: true } } },
+  });
+  let refunded = 0;
+  let reversed = 0;
+  for (const row of open) {
+    try {
+      const result = await gateway.verifyRefund(row.providerRefundId ?? "");
+      if (!result || result.state === "PROCESSING") continue;
+      await prisma.$transaction(async (tx) => {
+        await tx.refund.update({
+          where: { id: row.id },
+          data: { status: result.state, failureReason: result.state === "REVERSED" ? "Chapa reversed the refund; the money is back in the platform balance." : null },
+        });
+        await syncPaymentRefundState(tx, row.payment);
+      });
+      if (result.state === "REFUNDED") refunded += 1;
+      else {
+        reversed += 1;
+        console.error(`[refunds] Chapa reversed refund ${row.providerRefundId}; staff must settle it with the buyer`);
+      }
+    } catch (error) {
+      console.error(`[refunds] could not check refund ${row.providerRefundId}`, error);
+    }
+  }
+  return { refunded, reversed };
 }
