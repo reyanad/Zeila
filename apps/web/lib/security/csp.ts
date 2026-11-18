@@ -1,7 +1,9 @@
 /**
  * Content Security Policy for HTML pages. Scripts need the per-request nonce
- * (Next.js adds it to its own scripts); 'strict-dynamic' lets those load
- * Stripe.js. Styles allow inline attributes, which React uses for layout.
+ * (Next.js adds it to its own scripts); 'strict-dynamic' lets those load the
+ * chunks they need. Payment happens on Chapa's own checkout page, so the only
+ * Chapa origin here is the form target for the redirect to it. Styles allow
+ * inline attributes, which React uses for layout.
  * Kept free of Node APIs: it runs in middleware.
  */
 function origin(value: string | undefined): string | null {
@@ -19,15 +21,15 @@ export function contentSecurityPolicy(nonce: string, env: { production: boolean;
   const realtimeSocket = realtime ? realtime.replace(/^http/, "ws") : null;
   const directives: Array<[string, Array<string | null | false>]> = [
     ["default-src", ["'self'"]],
-    ["script-src", ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", "https://js.stripe.com", !env.production && "'unsafe-eval'"]],
+    ["script-src", ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", !env.production && "'unsafe-eval'"]],
     ["style-src", ["'self'", "'unsafe-inline'"]],
-    ["img-src", ["'self'", "data:", "blob:", "https://*.stripe.com", assets]],
+    ["img-src", ["'self'", "data:", "blob:", assets]],
     ["font-src", ["'self'", "data:"]],
-    ["connect-src", ["'self'", "https://api.stripe.com", "https://*.stripe.com", realtime, realtimeSocket, !env.production && "ws:"]],
-    ["frame-src", ["https://js.stripe.com", "https://hooks.stripe.com", "https://*.stripe.com"]],
+    ["connect-src", ["'self'", realtime, realtimeSocket, !env.production && "ws:"]],
+    ["frame-src", ["'none'"]],
     ["worker-src", ["'self'", "blob:"]],
     ["frame-ancestors", ["'none'"]],
-    ["form-action", ["'self'"]],
+    ["form-action", ["'self'", "https://checkout.chapa.co"]],
     ["base-uri", ["'self'"]],
     ["object-src", ["'none'"]],
   ];

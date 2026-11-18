@@ -3,7 +3,7 @@ import { z } from "zod";
 
 /**
  * Server environment, validated lazily on first use so `next build` and
- * `tsc` never need real secrets. Optional integrations (OAuth, Stripe, Resend,
+ * `tsc` never need real secrets. Optional integrations (OAuth, Chapa, Resend,
  * S3/R2, Redis) report themselves as "not configured" instead of crashing.
  */
 
@@ -33,18 +33,11 @@ const envSchema = z.object({
   RESEND_API_KEY: optionalString,
   EMAIL_FROM: z.string().default("Zeila <no-reply@example.com>"),
 
-  STRIPE_SECRET_KEY: optionalString,
-  STRIPE_PUBLISHABLE_KEY: optionalString,
-  STRIPE_WEBHOOK_SECRET: optionalString,
-  STRIPE_CONNECT_WEBHOOK_SECRET: optionalString,
-  // Country of the platform's own Stripe account. Sellers elsewhere are
-  // onboarded as cross-border "recipient" accounts (transfers only).
-  STRIPE_PLATFORM_COUNTRY: z
-    .string()
-    .trim()
-    .toUpperCase()
-    .regex(/^[A-Z]{2}$/, "STRIPE_PLATFORM_COUNTRY must be an ISO-3166 alpha-2 code")
-    .default("US"),
+  // Chapa: secret key (CHASECK_TEST-... in test mode) and the webhook secret
+  // set in the Chapa dashboard under Settings > Webhooks.
+  CHAPA_SECRET_KEY: optionalString,
+  CHAPA_WEBHOOK_SECRET: optionalString,
+  CHAPA_API_URL: z.url().default("https://api.chapa.co/v1"),
 
   S3_ENDPOINT: optionalString,
   S3_REGION: z.string().default("auto"),
@@ -65,9 +58,7 @@ export type Env = z.infer<typeof envSchema>;
 /** Values shipped in `.env.example`; they must never be accepted as real secrets. */
 const EXAMPLE_VALUES: ReadonlySet<string> = new Set([
   "generate_with_openssl_rand_base64_32",
-  "sk_test_xxx",
-  "pk_test_xxx",
-  "whsec_xxx",
+  "CHASECK_TEST-xxx",
   "re_xxx",
 ]);
 
@@ -120,20 +111,18 @@ export function githubOAuth(): OAuthCredentials | null {
   return clientId && clientSecret ? { clientId, clientSecret } : null;
 }
 
-export function stripeSecretKey(): string | null {
-  const key = getEnv().STRIPE_SECRET_KEY;
+export function chapaSecretKey(): string | null {
+  const key = getEnv().CHAPA_SECRET_KEY;
   return key && !isExample(key) ? key : null;
 }
 
-export function stripePublishableKey(): string | null {
-  const key = getEnv().STRIPE_PUBLISHABLE_KEY;
-  return key && !isExample(key) ? key : null;
-}
-
-export function stripeWebhookSecret(kind: "platform" | "connect"): string | null {
-  const env = getEnv();
-  const secret = kind === "platform" ? env.STRIPE_WEBHOOK_SECRET : env.STRIPE_CONNECT_WEBHOOK_SECRET;
+export function chapaWebhookSecret(): string | null {
+  const secret = getEnv().CHAPA_WEBHOOK_SECRET;
   return secret && !isExample(secret) ? secret : null;
+}
+
+export function chapaApiUrl(): string {
+  return getEnv().CHAPA_API_URL;
 }
 
 export function resendApiKey(): string | null {

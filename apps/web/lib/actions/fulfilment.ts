@@ -23,7 +23,7 @@ import { verifyAttachments } from "@/lib/attachments";
 import { authorize } from "@/lib/auth/session";
 import { formError, formSuccess, type FormState } from "@/lib/form-state";
 import { getClientIp } from "@/lib/request";
-import { getStripe } from "@/lib/stripe";
+import { getChapa } from "@/lib/chapa";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; message: string };
 
@@ -85,7 +85,7 @@ export async function trackingEventAction(subOrderId: string, shipmentId: string
 export async function cancelOrderAction(subOrderId: string, reason: string): Promise<ActionResult> {
   const user = await seller();
   if (!user) return { ok: false, message: "Your session has expired." };
-  const result = await attempt(() => cancelBySeller(getStripe(), user.id, subOrderId, reason || "seller could not fulfil", new Date()), SELLER_ORDER(subOrderId));
+  const result = await attempt(() => cancelBySeller(getChapa(), user.id, subOrderId, reason || "seller could not fulfil", new Date()), SELLER_ORDER(subOrderId));
   if (result.ok) await recordAudit({ actorId: user.id, action: "order.seller-cancel", entity: "SubOrder", entityId: subOrderId, data: { reason }, ipAddress: await getClientIp() });
   return result;
 }
@@ -107,7 +107,7 @@ export async function completeReturnAction(_prev: FormState, formData: FormData)
   const amount = parseMoneyInput(text(formData, "refund"));
   if (amount === null) return formError("Enter the refund amount, like 450 or 12.50.", { refund: "Enter an amount" });
   const result = await attempt(
-    () => completeReturn(getStripe(), user.id, text(formData, "rmaId"), { refundAmount: amount, restock: formData.get("restock") === "on" }, new Date()),
+    () => completeReturn(getChapa(), user.id, text(formData, "rmaId"), { refundAmount: amount, restock: formData.get("restock") === "on" }, new Date()),
     SELLER_ORDER(subOrderId),
   );
   if (result.ok) await recordAudit({ actorId: user.id, action: "return.refund", entity: "RmaRequest", entityId: text(formData, "rmaId"), data: { amount }, ipAddress: await getClientIp() });

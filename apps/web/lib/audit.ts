@@ -3,7 +3,7 @@ import { prisma, type Prisma } from "@marketplace/database";
 
 export interface AuditEntry {
   actorId: string | null;
-  /** Dotted verb, e.g. "auth.2fa.enable", "kyc.submit", "stripe.account.create". */
+  /** Dotted verb, e.g. "auth.2fa.enable", "kyc.submit", "payout.account.update". */
   action: string;
   entity: string;
   entityId: string;

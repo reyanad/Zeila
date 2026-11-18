@@ -70,3 +70,12 @@ describe("signed tickets", () => {
     expect(verifyTicket("download-ticket", signTicket("download-ticket", { grantId: "g1" }, -1))).toBeNull();
   });
 });
+
+describe("payout field encryption shared with the worker", () => {
+  it("opens what the core package sealed, and the reverse", async () => {
+    const { encryptAtRest, decryptAtRest } = await import("@marketplace/core");
+    const { decryptField, encryptField } = await import("./encryption");
+    expect(decryptField(encryptAtRest("0911234567"))).toBe("0911234567");
+    expect(decryptAtRest(encryptField("1000123456789"))).toBe("1000123456789");
+  });
+});

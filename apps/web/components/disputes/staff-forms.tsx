@@ -55,7 +55,7 @@ export function ChargebackEvidenceForm({ disputeId }: { disputeId: string }) {
       {result ? <Alert tone={result.ok ? "success" : "danger"}>{result.message}</Alert> : null}
       <Label htmlFor="evidence-summary">Summary (delivery proof, tracking, buyer messages, terms accepted)</Label>
       <Textarea id="evidence-summary" rows={6} maxLength={20000} value={summary} onChange={(event) => setSummary(event.currentTarget.value)} />
-      <p className="text-xs text-muted-foreground">Submitting sends the evidence to Stripe and cannot be edited afterwards.</p>
+      <p className="text-xs text-muted-foreground">Send this to Chapa from the merchant dashboard as well; saving adds it to the case file and cannot be edited afterwards.</p>
       <div>
         <Button
           disabled={pending}
@@ -67,7 +67,7 @@ export function ChargebackEvidenceForm({ disputeId }: { disputeId: string }) {
             })
           }
         >
-          {pending ? "Submitting…" : "Submit evidence"}
+          {pending ? "Saving…" : "Save evidence"}
         </Button>
       </div>
     </div>

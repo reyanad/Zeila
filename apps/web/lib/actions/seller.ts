@@ -2,7 +2,7 @@
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { encryptAtRest } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import {
   createStoreSchema,
@@ -11,19 +11,19 @@ import {
   KYC_DOCUMENT_KINDS,
   KYC_DOCUMENT_MAX_BYTES,
   kycSubmissionSchema,
+  payoutAccountSchema,
   type KycDocument,
 } from "@marketplace/shared-types";
 import { recordAudit } from "@/lib/audit";
 import { authorize } from "@/lib/auth/session";
+import { chapaErrorMessage, getChapa, payoutBanks } from "@/lib/chapa";
 import { encryptField } from "@/lib/crypto/encryption";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { formError, formSuccess, type FormState } from "@/lib/form-state";
 import { describeRetry, rateLimit } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request";
 import { syncStoreStatus } from "@/lib/seller/status";
-import { createOnboardingLink, ensureConnectedAccount } from "@/lib/seller/stripe-account";
 import { deleteVaultObject, putVaultObject } from "@/lib/storage";
-import { getStripe, stripeErrorMessage } from "@/lib/stripe";
 import { EXTENSION_BY_TYPE, readUpload } from "@/lib/uploads";
 
 function text(formData: FormData, name: string): string {
@@ -212,42 +212,66 @@ export async function submitKycAction(_prev: FormState, formData: FormData): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Step 3: payouts (Stripe Connect)
+// Step 3: payout account (Chapa transfers to a bank account or mobile wallet)
 // ---------------------------------------------------------------------------
 
-export async function startStripeOnboardingAction(_prev: FormState, _formData: FormData): Promise<FormState> {
+const PAYOUT_FIELDS = ["bankId", "accountName"] as const;
+
+export async function savePayoutAccountAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const auth = await authorize("store:manage");
   if (!auth.ok) return formError(auth.message);
+  const values = Object.fromEntries(PAYOUT_FIELDS.map((name) => [name, text(formData, name)]));
 
-  const stripe = getStripe();
-  if (!stripe) return formError("Payouts are not available yet: the platform has not configured Stripe.");
+  if (!getChapa()) return formError("Payouts are not available yet: the platform has not finished its Chapa setup.", undefined, values);
+  const limit = await rateLimit(`payout-account:${auth.user.id}`, 10, 60 * 60);
+  if (!limit.allowed) return formError(`Too many changes. ${describeRetry(limit.retryAfterSeconds)}`, undefined, values);
 
-  const limit = await rateLimit(`stripe-onboarding:${auth.user.id}`, 10, 10 * 60);
-  if (!limit.allowed) return formError(`Too many attempts. ${describeRetry(limit.retryAfterSeconds)}`);
-
-  const store = await prisma.store.findUnique({
-    where: { sellerId: auth.user.id },
-    select: { id: true, sellerId: true, country: true, stripeAccountId: true },
+  const parsed = payoutAccountSchema.safeParse({
+    bankId: text(formData, "bankId"),
+    accountName: text(formData, "accountName"),
+    accountNumber: text(formData, "accountNumber"),
+    confirmAccountNumber: text(formData, "confirmAccountNumber"),
   });
-  if (!store) return formError("Open your store first.");
+  if (!parsed.success) return formError("Check the highlighted fields.", fieldErrors(parsed.error), values);
+  const input = parsed.data;
 
-  let url: string;
+  const store = await prisma.store.findUnique({ where: { sellerId: auth.user.id }, select: { id: true } });
+  if (!store) return formError("Open your store first.", undefined, values);
+
+  let bank;
   try {
-    const accountId = await ensureConnectedAccount(stripe, store, auth.user.email);
-    if (!store.stripeAccountId) {
-      await recordAudit({
-        actorId: auth.user.id,
-        action: "stripe.account.create",
-        entity: "Store",
-        entityId: store.id,
-        data: { accountId },
-        ipAddress: await getClientIp(),
-      });
-    }
-    url = await createOnboardingLink(stripe, accountId);
+    bank = (await payoutBanks()).find((candidate) => candidate.id === input.bankId);
   } catch (error) {
-    console.error("[stripe] onboarding could not start", error);
-    return formError(stripeErrorMessage(error));
+    console.error("[payouts] could not load Chapa banks", error);
+    return formError(chapaErrorMessage(error), undefined, values);
   }
-  redirect(url);
+  if (!bank) return formError("Check the highlighted fields.", { bankId: "Choose a bank or wallet from the list" }, values);
+  if (bank.accountLength !== null && input.accountNumber.length !== bank.accountLength) {
+    const kind = bank.isMobileMoney ? "phone numbers" : "account numbers";
+    return formError("Check the highlighted fields.", { accountNumber: `${bank.name} ${kind} have ${bank.accountLength} digits` }, values);
+  }
+
+  await prisma.store.update({
+    where: { id: store.id },
+    data: {
+      payoutBankId: bank.id,
+      payoutBankName: bank.name,
+      payoutAccountName: input.accountName,
+      payoutAccountNumber: encryptAtRest(input.accountNumber),
+      payoutAccountLast4: input.accountNumber.slice(-4),
+      payoutAccountUpdatedAt: new Date(),
+      payoutsEnabled: true,
+    },
+  });
+  await syncStoreStatus(store.id);
+  await recordAudit({
+    actorId: auth.user.id,
+    action: "payout.account.update",
+    entity: "Store",
+    entityId: store.id,
+    data: { bank: bank.name, last4: input.accountNumber.slice(-4), mobileMoney: bank.isMobileMoney },
+    ipAddress: await getClientIp(),
+  });
+  revalidatePath(ONBOARDING_PATH);
+  return formSuccess(`Payouts will go to ${bank.name}, ending ${input.accountNumber.slice(-4)}.`);
 }

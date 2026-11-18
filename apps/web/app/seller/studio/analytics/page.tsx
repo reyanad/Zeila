@@ -55,7 +55,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
         <StatTile label="Refunded" value={money(stats.refunds)} note={stats.sales > 0 ? `${Math.round((stats.refunds / stats.sales) * 1000) / 10}% of sales` : undefined} />
         <StatTile label="Rating" value={stats.rating.count > 0 ? `${stats.rating.average.toFixed(1)} ★` : "—"} note={`${stats.rating.count} review${stats.rating.count === 1 ? "" : "s"}`} />
         <StatTile label="Held in escrow" value={money(stats.balances.escrow)} note="Released after delivery and the protection window" />
-        <StatTile label="Released, awaiting payout" value={money(stats.balances.payable)} note="Sent to your bank by Stripe" />
+        <StatTile label="Released, awaiting payout" value={money(stats.balances.payable)} note="Sent to your bank or wallet by Chapa" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

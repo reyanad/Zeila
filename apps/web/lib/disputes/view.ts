@@ -38,7 +38,7 @@ export async function loadDisputeView(disputeId: string) {
       refundAmount: true,
       respondBy: true,
       evidenceDueBy: true,
-      stripeDisputeId: true,
+      providerCaseId: true,
       createdAt: true,
       subOrderId: true,
       orderItem: { select: { titleSnapshot: true } },

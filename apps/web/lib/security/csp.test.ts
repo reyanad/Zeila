@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import { contentSecurityPolicy } from "./csp";
 
 describe("contentSecurityPolicy", () => {
-  it("locks production pages down to nonced scripts, Stripe and our own origins", () => {
+  it("locks production pages down to nonced scripts and our own origins", () => {
     const policy = contentSecurityPolicy("abc123", { production: true, assetBaseUrl: "https://cdn.zeila.example/assets", realtimeUrl: "https://rt.zeila.example" });
-    expect(policy).toContain("script-src 'self' 'nonce-abc123' 'strict-dynamic' https://js.stripe.com;");
+    expect(policy).toContain("script-src 'self' 'nonce-abc123' 'strict-dynamic';");
+    expect(policy).toContain("form-action 'self' https://checkout.chapa.co");
+    expect(policy).toContain("frame-src 'none'");
+    expect(policy).not.toContain("stripe");
     expect(policy).not.toContain("unsafe-eval");
     expect(policy).toContain("https://cdn.zeila.example");
     expect(policy).toContain("wss://rt.zeila.example");

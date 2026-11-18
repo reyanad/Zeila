@@ -17,7 +17,7 @@ import { recordAudit } from "@/lib/audit";
 import { authorize, getCurrentUser } from "@/lib/auth/session";
 import { verifyDisputeFiles } from "@/lib/dispute-files";
 import { getClientIp } from "@/lib/request";
-import { getStripe } from "@/lib/stripe";
+import { getChapa } from "@/lib/chapa";
 
 export type DisputeActionResult = { ok: true; message?: string } | { ok: false; message: string };
 
@@ -85,7 +85,7 @@ export async function replyToDisputeAction(disputeId: string, values: DisputeRep
 export async function acceptDisputeOfferAction(disputeId: string): Promise<DisputeActionResult> {
   const user = await getCurrentUser();
   if (!user) return { ok: false, message: "Your session has expired." };
-  const result = await attempt(() => acceptDisputeProposal(getStripe(), user.id, disputeId, new Date()), [`/disputes/${disputeId}`], "Refund on its way. The case is closed.");
+  const result = await attempt(() => acceptDisputeProposal(getChapa(), user.id, disputeId, new Date()), [`/disputes/${disputeId}`], "Refund on its way. The case is closed.");
   if (result.ok) await recordAudit({ actorId: user.id, action: "dispute.accept-offer", entity: "Dispute", entityId: disputeId, ipAddress: await getClientIp() });
   return result;
 }
@@ -108,7 +108,7 @@ export async function resolveDisputeAction(disputeId: string, values: { refund: 
   const refundAmount = values.refund.trim() ? parseMoneyInput(values.refund) : 0;
   if (refundAmount === null) return { ok: false, message: "Enter the refund amount, like 450 or 12.50 (0 for none)." };
   const result = await attempt(
-    () => resolveDispute(getStripe(), auth.user.id, disputeId, { refundAmount, note: values.note }, new Date()),
+    () => resolveDispute(getChapa(), auth.user.id, disputeId, { refundAmount, note: values.note }, new Date()),
     [`/admin/disputes/${disputeId}`, "/admin/disputes", `/disputes/${disputeId}`],
     "Decision recorded and both sides notified.",
   );
@@ -116,24 +116,20 @@ export async function resolveDisputeAction(disputeId: string, values: { refund: 
   return result;
 }
 
-/** Send the seller's evidence to Stripe for a card dispute. */
+/**
+ * Record the evidence staff sent to Chapa for a card dispute. Chapa handles
+ * chargeback evidence through its dashboard and support team, not an API, so
+ * this keeps the case file complete and tells both sides it was sent.
+ */
 export async function submitChargebackEvidenceAction(disputeId: string, values: { summary: string }): Promise<DisputeActionResult> {
   const auth = await authorize("dispute:resolve");
   if (!auth.ok) return { ok: false, message: auth.message };
-  const stripe = getStripe();
-  if (!stripe) return { ok: false, message: "Stripe is not configured." };
-  const dispute = await prisma.dispute.findUnique({ where: { id: disputeId }, select: { kind: true, stripeDisputeId: true, status: true } });
-  if (!dispute || dispute.kind !== "CHARGEBACK" || !dispute.stripeDisputeId) return { ok: false, message: "This is not a card dispute." };
+  const dispute = await prisma.dispute.findUnique({ where: { id: disputeId }, select: { kind: true, status: true } });
+  if (!dispute || dispute.kind !== "CHARGEBACK") return { ok: false, message: "This is not a card dispute." };
   const summary = values.summary.trim();
   if (summary.length < 40) return { ok: false, message: "Write the evidence summary for the bank (at least 40 characters)." };
-  try {
-    await stripe.disputes.update(dispute.stripeDisputeId, { evidence: { uncategorized_text: summary.slice(0, 20_000) }, submit: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Stripe refused the evidence.";
-    return { ok: false, message };
-  }
-  await prisma.disputeMessage.create({ data: { disputeId, authorId: auth.user.id, party: "STAFF", body: `Evidence submitted to the bank:\n\n${summary.slice(0, 4_000)}` } });
+  await prisma.disputeMessage.create({ data: { disputeId, authorId: auth.user.id, party: "STAFF", body: `Evidence sent to Chapa for the bank:\n\n${summary.slice(0, 4_000)}` } });
   await recordAudit({ actorId: auth.user.id, action: "chargeback.evidence", entity: "Dispute", entityId: disputeId, ipAddress: await getClientIp() });
   revalidatePath(`/admin/disputes/${disputeId}`);
-  return { ok: true, message: "Evidence submitted. The bank usually decides within 60–75 days." };
+  return { ok: true, message: "Evidence recorded. Send the same summary and files to Chapa from the merchant dashboard if you have not already." };
 }

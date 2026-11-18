@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { abandonPendingOrders, AFFILIATE_COOKIE, attributeOrder, CheckoutError, completeOrderPayment, placeOrder } from "@marketplace/core";
+import { abandonPendingOrders, AFFILIATE_COOKIE, attributeOrder, CheckoutError, completeOrderPayment, GATEWAY_CURRENCIES, placeOrder, startCheckout } from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { addressSchema, countryCodeSchema, fieldErrors, isSupportedCurrency, type AddressSnapshot } from "@marketplace/shared-types";
 import { recordAudit } from "@/lib/audit";
@@ -11,7 +11,8 @@ import { writableCart } from "@/lib/cart-session";
 import { formError, type FormState } from "@/lib/form-state";
 import { describeRetry, rateLimit } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request";
-import { getStripe } from "@/lib/stripe";
+import { chapaErrorMessage, getChapa } from "@/lib/chapa";
+import { appUrl } from "@/lib/env";
 
 function text(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -97,11 +98,12 @@ export async function placeOrderAction(currency: string, addressId: string | nul
       }
     : null;
 
-  const stripe = getStripe();
+  const chapa = getChapa();
+  if (currencyUnsupported(currency)) return { ok: false, message: `Payments are available in ${GATEWAY_CURRENCIES.join(" and ")} only. Switch the cart currency to continue.` };
   let order;
   try {
     // An earlier unpaid checkout still holds stock; give it back first.
-    await abandonPendingOrders(stripe, auth.user.id, currency);
+    await abandonPendingOrders(chapa, auth.user.id, currency);
     const cart = await writableCart();
     order = await placeOrder({
       cart,
@@ -130,9 +132,40 @@ export async function placeOrderAction(currency: string, addressId: string | nul
   });
 
   if (order.grandTotal === 0) {
-    await completeOrderPayment({ orderId: order.id, paymentIntentId: null, chargeId: null, amount: 0, currency: order.currency, paidAt: new Date() });
+    await completeOrderPayment({ orderId: order.id, providerRef: null, providerReference: null, amount: 0, currency: order.currency, paidAt: new Date() });
     redirect(`/orders/${order.id}?paid=1`);
   }
-  if (!stripe) return { ok: false, message: "Card payments are not available yet: the platform has not configured Stripe." };
   redirect(`/checkout/pay/${order.id}`);
+}
+
+function currencyUnsupported(currency: string): boolean {
+  return !GATEWAY_CURRENCIES.includes(currency);
+}
+
+/** Send the buyer to Chapa's hosted checkout for an order (telebirr, CBE Birr, M-Pesa, cards, bank). */
+export async function startPaymentAction(orderId: string, _prev: FormState, _formData: FormData): Promise<FormState> {
+  const auth = await authorize("order:create");
+  if (!auth.ok) return formError(auth.message);
+  const order = await prisma.order.findFirst({ where: { id: orderId, buyerId: auth.user.id }, select: { id: true, status: true } });
+  if (!order) return formError("That order does not exist.");
+  if (order.status !== "PENDING_PAYMENT") redirect(`/orders/${order.id}`);
+  const chapa = getChapa();
+  if (!chapa) return formError("Payments are not available yet: the platform has not finished its Chapa setup.");
+  const limit = await rateLimit(`pay:${auth.user.id}`, 10, 10 * 60);
+  if (!limit.allowed) return formError(`Too many payment attempts. ${describeRetry(limit.retryAfterSeconds)}`);
+
+  let checkoutUrl: string;
+  try {
+    ({ checkoutUrl } = await startCheckout(
+      chapa,
+      order.id,
+      { returnUrl: appUrl(`/checkout/return/${order.id}`), callbackUrl: appUrl("/api/payments/chapa/callback") },
+      new Date(),
+    ));
+  } catch (error) {
+    if (error instanceof CheckoutError) return formError(error.message);
+    console.error(`[payments] could not start Chapa checkout for ${order.id}`, error);
+    return formError(chapaErrorMessage(error));
+  }
+  redirect(checkoutUrl);
 }

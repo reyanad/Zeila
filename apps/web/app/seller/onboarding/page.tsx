@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { prisma, type KycStatus, type StoreStatus, type StripeOnboardingStatus } from "@marketplace/database";
+import { prisma, type KycStatus, type StoreStatus } from "@marketplace/database";
 import { countryOptions } from "@marketplace/shared-types";
 import { Alert, Badge, type BadgeTone, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@marketplace/ui";
 import { CreateStoreForm } from "@/components/seller/create-store-form";
 import { KycForm } from "@/components/seller/kyc-form";
-import { StripeConnectForm } from "@/components/seller/stripe-connect-form";
+import { PayoutAccountForm, type PayoutBankOption } from "@/components/seller/payout-account-form";
 import { requireUser } from "@/lib/auth/session";
-import { stripeSecretKey } from "@/lib/env";
+import { getChapa, payoutBanks } from "@/lib/chapa";
 
 export const metadata: Metadata = { title: "Seller setup" };
 
@@ -28,12 +28,6 @@ const STORE_STATUS_LABEL: Record<StoreStatus, string> = {
   ACTIVE: "Open for business",
   SUSPENDED: "Suspended",
   CLOSED: "Closed",
-};
-
-const STRIPE_MESSAGES: Record<string, { tone: "info" | "warning"; text: string }> = {
-  returned: { tone: "info", text: "Welcome back from Stripe. Your payout status below is up to date." },
-  "sync-failed": { tone: "warning", text: "Stripe did not answer just now. Your payout status will update within a few minutes." },
-  "link-failed": { tone: "warning", text: "The Stripe link expired and a new one could not be created. Try again below." },
 };
 
 function Step({ number, title, description, state, children }: {
@@ -69,10 +63,10 @@ function kycState(status: KycStatus | undefined, hasStore: boolean): StepState {
   return "todo";
 }
 
-function payoutState(status: StripeOnboardingStatus | undefined, payoutsEnabled: boolean, hasStore: boolean): StepState {
+function payoutState(hasAccount: boolean, payoutsEnabled: boolean, hasStore: boolean): StepState {
   if (!hasStore) return "locked";
-  if (status === "COMPLETE" && payoutsEnabled) return "done";
-  if (status === "RESTRICTED") return "attention";
+  if (hasAccount && payoutsEnabled) return "done";
+  if (hasAccount) return "attention";
   return "todo";
 }
 
@@ -83,7 +77,6 @@ export default async function SellerOnboardingPage({
 }) {
   const user = await requireUser("/seller/onboarding");
   const params = await searchParams;
-  const stripeOutcome = typeof params.stripe === "string" ? STRIPE_MESSAGES[params.stripe] : undefined;
 
   const [store, kyc] = await Promise.all([
     prisma.store.findUnique({
@@ -94,8 +87,9 @@ export default async function SellerOnboardingPage({
         status: true,
         country: true,
         currency: true,
-        stripeAccountId: true,
-        stripeOnboarding: true,
+        payoutBankName: true,
+        payoutAccountName: true,
+        payoutAccountLast4: true,
         payoutsEnabled: true,
       },
     }),
@@ -107,10 +101,24 @@ export default async function SellerOnboardingPage({
   ]);
 
   const countries = countryOptions().map((country) => ({ value: country.code, label: country.name }));
-  const paymentsConfigured = stripeSecretKey() !== null;
+  const paymentsConfigured = getChapa() !== null;
   const hasStore = store !== null;
   const identity = kycState(kyc?.status, hasStore);
-  const payouts = payoutState(store?.stripeOnboarding, store?.payoutsEnabled ?? false, hasStore);
+  const savedAccount =
+    store?.payoutBankName && store.payoutAccountName && store.payoutAccountLast4
+      ? { bankName: store.payoutBankName, accountName: store.payoutAccountName, last4: store.payoutAccountLast4 }
+      : null;
+  const payouts = payoutState(savedAccount !== null, store?.payoutsEnabled ?? false, hasStore);
+  let banks: PayoutBankOption[] = [];
+  let banksProblem = false;
+  if (paymentsConfigured && hasStore) {
+    try {
+      banks = await payoutBanks();
+    } catch (error) {
+      console.error("[payouts] could not load Chapa banks", error);
+      banksProblem = true;
+    }
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-10">
@@ -127,7 +135,6 @@ export default async function SellerOnboardingPage({
           We sent a confirmation link when you registered. Open it, then come back to set up your store.
         </Alert>
       ) : null}
-      {stripeOutcome ? <Alert tone={stripeOutcome.tone}>{stripeOutcome.text}</Alert> : null}
 
       <Step
         number={1}
@@ -184,26 +191,28 @@ export default async function SellerOnboardingPage({
 
       <Step
         number={3}
-        title="Connect payouts"
-        description="Stripe holds and sends your earnings to your bank account. Setup takes about five minutes."
+        title="Add your payout account"
+        description="Chapa sends your earnings to your bank account or mobile wallet (telebirr, CBE Birr, M-Pesa) after each order is released."
         state={payouts}
       >
         {payouts === "locked" ? (
           <p className="text-sm text-muted-foreground">Open your store first.</p>
         ) : !paymentsConfigured ? (
           <Alert tone="warning" title="Payouts are not available yet">
-            The platform has not finished its Stripe setup. You can complete the other steps now.
+            The platform has not finished its Chapa setup. You can complete the other steps now.
           </Alert>
-        ) : payouts === "done" ? (
-          <p className="text-sm">Payouts are connected. Earnings are paid out once orders are released from escrow.</p>
+        ) : banksProblem ? (
+          <Alert tone="warning" title="Chapa did not answer">
+            The list of banks could not be loaded. Reload the page in a minute.
+          </Alert>
         ) : (
           <div className="flex flex-col gap-3">
             {payouts === "attention" ? (
-              <Alert tone="danger" title="Stripe needs more information">
-                Your payout account is restricted. Continue on Stripe to see what is missing.
+              <Alert tone="danger" title="Your last payout could not be sent">
+                Check the account details below and save them again. Your earnings stay safe on Zeila until then.
               </Alert>
             ) : null}
-            <StripeConnectForm label={store?.stripeAccountId ? "Continue on Stripe" : "Set up payouts with Stripe"} />
+            <PayoutAccountForm banks={banks} saved={payouts === "attention" ? null : savedAccount} />
           </div>
         )}
       </Step>

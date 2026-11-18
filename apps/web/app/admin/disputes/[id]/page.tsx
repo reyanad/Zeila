@@ -22,7 +22,7 @@ export default async function AdminDisputePage({ params }: { params: Promise<{ i
   const open = OPEN_STATUSES.includes(dispute.status);
   const currency = dispute.subOrder.currency;
   const money = (amount: number) => formatPrice(amount, currency);
-  const evidenceSubmitted = dispute.messages.some((message) => message.party === "STAFF" && message.body.startsWith("Evidence submitted"));
+  const evidenceSubmitted = dispute.messages.some((message) => message.party === "STAFF" && (message.body.startsWith("Evidence sent") || message.body.startsWith("Evidence submitted")));
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
@@ -40,7 +40,7 @@ export default async function AdminDisputePage({ params }: { params: Promise<{ i
             <ResolveDisputeForm disputeId={dispute.id} currency={currency} maxRefund={money(dispute.remaining)} suggested={dispute.latestProposal !== null ? minorToInput(Math.min(dispute.latestProposal, dispute.remaining)) : ""} />
           ) : null}
           {open && dispute.kind === "CHARGEBACK" ? (
-            evidenceSubmitted ? <Alert tone="info">Evidence was submitted. The case closes automatically when the bank decides.</Alert> : <ChargebackEvidenceForm disputeId={dispute.id} />
+            evidenceSubmitted ? <Alert tone="info">Evidence was recorded. Close the case once Chapa tells you the bank&apos;s decision.</Alert> : <ChargebackEvidenceForm disputeId={dispute.id} />
           ) : null}
         </div>
         <aside className="flex flex-col gap-4 text-sm">
@@ -63,7 +63,7 @@ export default async function AdminDisputePage({ params }: { params: Promise<{ i
             <p>
               Escrow: {dispute.subOrder.escrow ? `${dispute.subOrder.escrow.status.toLowerCase()}, ${money(dispute.subOrder.escrow.amount - dispute.subOrder.escrow.refunded)}` : "none"}
             </p>
-            {dispute.stripeDisputeId ? <p className="mt-2 text-xs text-muted-foreground">Stripe dispute {dispute.stripeDisputeId}</p> : null}
+            {dispute.providerCaseId ? <p className="mt-2 text-xs text-muted-foreground">Chapa case {dispute.providerCaseId}</p> : null}
           </section>
           <section className="rounded-lg border border-border p-4">
             <h2 className="mb-2 font-medium">Items and delivery</h2>

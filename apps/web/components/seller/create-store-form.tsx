@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { SUPPORTED_CURRENCIES } from "@marketplace/shared-types";
+import { STORE_CURRENCIES } from "@marketplace/shared-types";
 import { Field } from "@/components/form/field";
 import { FormMessage } from "@/components/form/form-message";
 import { SelectField, type SelectOption } from "@/components/form/select-field";
@@ -9,7 +9,7 @@ import { SubmitButton } from "@/components/form/submit-button";
 import { createStoreAction } from "@/lib/actions/seller";
 import { IDLE_FORM_STATE } from "@/lib/form-state";
 
-const CURRENCY_OPTIONS: SelectOption[] = SUPPORTED_CURRENCIES.map((code) => ({ value: code, label: code }));
+const CURRENCY_OPTIONS: SelectOption[] = STORE_CURRENCIES.map((code) => ({ value: code, label: code === "ETB" ? "Ethiopian birr (ETB)" : code }));
 
 function suggestSlug(name: string): string {
   return name
@@ -66,7 +66,7 @@ export function CreateStoreForm({ countries }: { countries: readonly SelectOptio
           label="Currency"
           options={CURRENCY_OPTIONS}
           required
-          defaultValue={state.values?.currency ?? "USD"}
+          defaultValue={state.values?.currency ?? "ETB"}
           error={state.fields?.currency}
         />
       </div>
