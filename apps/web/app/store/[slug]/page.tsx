@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!store) return { title: "Store not found" };
   return {
     title: store.name,
-    description: store.tagline ?? `Shop ${store.name} on the marketplace.`,
+    description: store.tagline ?? `Shop ${store.name} on Zeila.`,
     alternates: { canonical: siteUrl(`/store/${store.slug}`) },
   };
 }

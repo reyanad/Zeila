@@ -1,7 +1,8 @@
 import "server-only";
+import { APP_NAME } from "@marketplace/shared-types";
 import type { EmailMessage } from "./send";
 
-const BRAND = "Marketplace";
+const BRAND = APP_NAME;
 
 function escapeHtml(value: string): string {
   return value

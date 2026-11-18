@@ -31,7 +31,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_DEFAULT_CURRENCY: z.string().default("USD"),
 
   RESEND_API_KEY: optionalString,
-  EMAIL_FROM: z.string().default("Marketplace <no-reply@example.com>"),
+  EMAIL_FROM: z.string().default("Zeila <no-reply@example.com>"),
 
   STRIPE_SECRET_KEY: optionalString,
   STRIPE_PUBLISHABLE_KEY: optionalString,

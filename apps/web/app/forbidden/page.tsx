@@ -11,7 +11,7 @@ export default function ForbiddenPage() {
         <CardHeader>
           <CardTitle>You do not have access to this page</CardTitle>
           <CardDescription>
-            Your account does not have the role this area requires. If you think that is a mistake, contact the marketplace team.
+            Your account does not have the role this area requires. If you think that is a mistake, contact the Zeila team.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex gap-3">

@@ -94,6 +94,7 @@ export interface CursorPage<T> {
 // Platform constants
 // ---------------------------------------------------------------------------
 
+export const APP_NAME = "Zeila";
 export const DEFAULT_PLATFORM_FEE_BPS = 500; // 5%
 export const DEFAULT_ESCROW_HOLD_DAYS = 3;
 export const DEFAULT_LICENSE_ACTIVATIONS = 3;

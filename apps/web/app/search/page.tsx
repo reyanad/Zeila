@@ -21,7 +21,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-8">
-      <h1 className="text-2xl font-semibold tracking-tight">{params.q ? `Results for “${params.q}”` : "Browse the marketplace"}</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{params.q ? `Results for “${params.q}”` : "Browse Zeila"}</h1>
       <SearchFilters action="/search" echo={echo} categories={categories} viewerCurrency={viewerCurrency} />
       <p className="text-sm text-muted-foreground" aria-live="polite">
         {result.total === 1 ? "1 result" : `${result.total.toLocaleString("en")} results`}

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { APP_NAME } from "@marketplace/shared-types";
 import type { ReactNode } from "react";
 import { AffiliateTracker } from "@/components/growth/affiliate-tracker";
 import { RealtimeProvider } from "@/components/realtime/realtime-provider";
@@ -8,7 +9,7 @@ import { realtimeUrl } from "@/lib/realtime";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Marketplace", template: "%s · Marketplace" },
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
   description:
     "All-in-one marketplace for physical products, digital assets and professional services with escrow-protected payments.",
 };

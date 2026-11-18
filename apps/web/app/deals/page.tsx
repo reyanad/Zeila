@@ -5,7 +5,7 @@ import { Countdown } from "@/components/growth/countdown";
 import { ListingGrid } from "@/components/storefront/listing-card";
 import { getFxRates, getViewerCurrency } from "@/lib/storefront/fx";
 
-export const metadata: Metadata = { title: "Flash deals", description: "Time-limited discounts from sellers across the marketplace." };
+export const metadata: Metadata = { title: "Flash deals", description: "Time-limited discounts from sellers across Zeila." };
 export const dynamic = "force-dynamic";
 
 export default async function DealsPage() {

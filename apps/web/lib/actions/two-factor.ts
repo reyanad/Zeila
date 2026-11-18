@@ -2,7 +2,7 @@
 
 import QRCode from "qrcode";
 import { prisma } from "@marketplace/database";
-import { totpCodeSchema } from "@marketplace/shared-types";
+import { APP_NAME, totpCodeSchema } from "@marketplace/shared-types";
 import { recordAudit } from "@/lib/audit";
 import { verifySecondFactor } from "@/lib/auth/login";
 import { authorize } from "@/lib/auth/session";
@@ -14,7 +14,7 @@ import { securityNoticeMessage } from "@/lib/email/templates";
 import { describeRetry, rateLimit } from "@/lib/rate-limit";
 import { getClientIp } from "@/lib/request";
 
-const ISSUER = "Marketplace";
+const ISSUER = APP_NAME;
 const RECOVERY_CODE_COUNT = 10;
 
 export interface TwoFactorState {

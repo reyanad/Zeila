@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { isStaff } from "@marketplace/shared-types";
+import { APP_NAME, isStaff } from "@marketplace/shared-types";
 import { buttonVariants } from "@marketplace/ui";
 import { SignOutButton } from "@/components/auth/sign-out-button";
 import { CurrencySwitcher } from "@/components/storefront/currency-switcher";
@@ -22,11 +22,11 @@ export async function SiteHeader() {
     <header className="border-b border-border bg-card">
       <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-4 px-4">
         <Link href="/" className="text-base font-semibold tracking-tight">
-          Marketplace
+          {APP_NAME}
         </Link>
         <form action="/search" role="search" className="hidden flex-1 md:block">
           <label htmlFor="header-search" className="sr-only">
-            Search the marketplace
+            Search {APP_NAME}
           </label>
           <input
             id="header-search"
