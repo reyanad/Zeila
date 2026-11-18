@@ -9,13 +9,14 @@ All-in-one multi-vendor marketplace combining:
 - **Services & gigs** — Basic/Standard/Premium tiers, milestone escrow, intake forms,
   deliverable workspaces and revision loops.
 
-Payments run on Stripe Connect split payments with delayed escrow transfers, backed by
+Payments run on Chapa (telebirr, CBE Birr, M-Pesa, cards and bank): the platform collects each
+payment, holds every store's share in escrow and pays sellers by Chapa transfer after delivery, backed by
 an immutable double-entry ledger.
 
 ## Stack
 
 Turborepo · Next.js 15 (App Router) · TypeScript strict · PostgreSQL 16 + Prisma 7 +
-pgvector · Meilisearch · Redis + BullMQ · Stripe Connect · Cloudflare R2/S3 · Socket.io ·
+pgvector · Meilisearch · Redis + BullMQ · Chapa · Cloudflare R2/S3 · Socket.io ·
 Resend · React Native (Expo) companion app.
 
 ## Repository layout

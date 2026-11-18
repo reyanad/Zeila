@@ -1,7 +1,7 @@
 # Build Progress
 
 Production marketplace: physical e-commerce + digital assets + services/gigs,
-split orders, Stripe Connect escrow, double-entry ledger.
+split orders, Chapa payments with escrow and seller payouts, double-entry ledger.
 
 ## Phases
 
@@ -19,8 +19,8 @@ split orders, Stripe Connect escrow, double-entry ledger.
   recovery codes, session revocation (`User.sessionVersion`), RBAC permission matrix
   (`BUYER`/`SELLER`/`MODERATOR`/`SUPER_ADMIN`) enforced in middleware, pages and actions;
   seller onboarding at `/seller/onboarding` (open store → KYC with encrypted vault uploads →
-  Stripe Connect Express payouts); idempotent Stripe webhook inbox (`WebhookEvent`) at
-  `/api/webhooks/stripe` and `/api/webhooks/stripe-connect`; store status derived from
+  payout account); idempotent webhook inbox (`WebhookEvent`, now at `/api/webhooks/chapa`
+  since Phase 13); store status derived from
   KYC + payout readiness (`DRAFT` → `PENDING_REVIEW` → `ACTIVE`).
 - [x] **Phase 3 — Vendor Studio**: `/seller/studio` with listings table and quick status
   actions; one adaptive builder for all three types, validated by shared Zod schemas
@@ -44,7 +44,7 @@ split orders, Stripe Connect escrow, double-entry ledger.
   shipping profiles, destination tax table), guest + account carts (merged at sign-in),
   promo-code validation (dates, currency, usage and per-buyer limits), split orders (one
   sub-order per store with platform fee), race-free stock reservations, 30-minute payment
-  hold with a worker sweep that cancels expired orders, Stripe PaymentIntent (separate
+  hold with a worker sweep that cancels expired orders, payment (Chapa since Phase 13; originally a Stripe PaymentIntent with separate
   charges and transfers via `transfer_group`) with the Payment Element, payment webhooks
   (late or mismatched payments are refunded automatically), free-order path, cart,
   checkout, payment and order pages, seller shipping-rates page.
@@ -82,7 +82,7 @@ split orders, Stripe Connect escrow, double-entry ledger.
       (unread-message e-mails throttled to one per 30 minutes, opt-out toggle); resolution
       center (`/disputes`): buyer opens a case with evidence (escrow frozen), seller replies or
       offers a refund the buyer can accept, either side can escalate, deadlines auto-escalate
-      or close; staff queue and decisions in `/admin/disputes`; Stripe chargebacks recorded as
+      or close; staff queue and decisions in `/admin/disputes`; card chargebacks (reported by Stripe until Phase 13) recorded as
       card disputes with evidence submission, and the bank's decision applied to the ledger.
 - [x] **Phase 9 — Growth**: flash sales (`/seller/studio/promotions`): a percentage off chosen
       listings for a time window, optionally capped per listing; sale units are claimed with a
@@ -131,6 +131,15 @@ split orders, Stripe Connect escrow, double-entry ledger.
       integration tests on Postgres + pgvector with a migration drift check, production build,
       E2E); Docker images for web, worker and realtime published to GHCR after green CI;
       production Docker Compose with Caddy (automatic HTTPS).
+- [x] **Phase 13 — Chapa instead of Stripe** (owner's decision): buyers pay on Chapa's hosted
+      checkout (telebirr, CBE Birr, M-Pesa, cards, bank); every attempt has its own `tx_ref` and
+      is confirmed with Chapa's verify endpoint, whether it arrives by the buyer's return, the
+      server callback, the signed webhook or the expiry sweep; late or mismatched payments are
+      refunded automatically. Sellers add a bank account or mobile wallet (stored encrypted) in
+      Seller setup, and released escrow is paid by Chapa transfer, with a reversing ledger entry
+      when a transfer fails. Refunds go through Chapa's refund API once per business event. Stores
+      sell in ETB. Also: the Zeila name replaces "Marketplace", GitHub sign-in links only
+      GitHub-verified e-mails, and the Vendor Studio pages no longer crash.
 
 ## Local setup (after Phase 1)
 
@@ -146,7 +155,7 @@ npm run dev                   # turbo dev (web on :3000)
 ## Environment variables added in Phase 1
 
 See `.env.example` — database/redis/meilisearch connection settings, and
-placeholders (used from Phase 2 on) for Auth.js, Stripe Connect, R2/S3 and Resend.
+placeholders (used from Phase 2 on) for Auth.js, payments, R2/S3 and Resend.
 
 ## Environment variables added in Phase 2
 
@@ -154,19 +163,9 @@ placeholders (used from Phase 2 on) for Auth.js, Stripe Connect, R2/S3 and Resen
 | --- | --- |
 | `DATA_ENCRYPTION_KEY` | AES-256-GCM key material for TOTP secrets, ID numbers and vault files. Required in production; never rotate without re-encrypting data. |
 | `SUPER_ADMIN_EMAILS` | Comma-separated addresses promoted to `SUPER_ADMIN` after e-mail confirmation. |
-| `STRIPE_PLATFORM_COUNTRY` | Country of the platform Stripe account (default `US`). Sellers elsewhere get cross-border `recipient` accounts. |
 | `LOCAL_STORAGE_DIR` | Dev-only file storage when S3/R2 credentials are empty (git-ignored). |
 
-Stripe webhooks (local development):
-
-```bash
-stripe listen --forward-to localhost:3000/api/webhooks/stripe            # platform events
-stripe listen --forward-connect-to localhost:3000/api/webhooks/stripe-connect  # connected accounts
-```
-
-Put each printed `whsec_...` secret in `STRIPE_WEBHOOK_SECRET` / `STRIPE_CONNECT_WEBHOOK_SECRET`.
-Subscribe the Connect endpoint to `account.updated`, `capability.updated` and
-`account.application.deauthorized`.
+Payment provider settings moved to Chapa in Phase 13 (see "Payments with Chapa").
 
 ## Environment variables added in Phase 3
 
@@ -179,9 +178,7 @@ After the first migration, load the starter categories: `npm run db:seed`.
 
 ## Checkout setup (Phase 5)
 
-- `STRIPE_PUBLISHABLE_KEY` is read on the server and handed to the payment form.
-- Subscribe the platform webhook (`/api/webhooks/stripe`) to `payment_intent.succeeded`,
-  `payment_intent.payment_failed` and `payment_intent.processing`.
+- Payment uses Chapa's hosted checkout (see "Payments with Chapa").
 - Sellers set shipping rates under **Studio → Shipping** before publishing physical products.
 - Tax rates are a platform setting (`tax_rates`); until an administrator configures them,
   no tax is charged (admin UI arrives in Phase 10).
@@ -190,12 +187,9 @@ After the first migration, load the starter categories: `npm run db:seed`.
 
 Payment → `platform:cash` debited; each store's share (after commission) credited to
 `store:<id>:escrow`, commission to `platform:fees`, platform-funded discounts debited to
-`platform:promotions`. Release moves escrow → `store:<id>:payable`; the Stripe transfer
-settles payable against cash. `trialBalance()` must always return 0 per currency.
-
-Additional webhook events: platform endpoint `charge.dispute.created`,
-`charge.dispute.closed`, `charge.refunded`; Connect endpoint `payout.created`,
-`payout.updated`, `payout.paid`, `payout.failed`, `payout.canceled`.
+`platform:promotions`. Release moves escrow → `store:<id>:payable`; the Chapa transfer to the
+seller settles payable against cash (reversed if the transfer fails). `trialBalance()` must
+always return 0 per currency.
 
 ## Fulfilment (Phase 7)
 
@@ -208,8 +202,8 @@ Refunds come out of escrow, so they are possible only while it is held or frozen
 release, recovery goes through disputes (Phase 8). A refund of `R` from a sub-order the
 buyer paid `P` for debits the store's escrow and the platform's commission and credits any
 platform-funded promotion in proportion, so a full refund exactly reverses the payment
-entry. Stripe refunds use idempotency keys per business event (`refund-rma:<id>`,
-`refund-seller-cancel:<subOrderId>`).
+entry. Chapa refunds carry a reference derived from the business event (`rma:<id>`,
+`seller-cancel:<subOrderId>`), so the same refund is never sent twice.
 
 Licence API for software vendors (JSON, 60 requests per minute per IP):
 
@@ -271,7 +265,7 @@ Store builds use EAS: `npx eas init` (sets the project id; put it in
 `EXPO_PUBLIC_EAS_PROJECT_ID`), then `npx eas build --platform all`. Push notifications only
 work on real devices with a project id. The API lives under `/api/mobile/*` on the web app
 (bearer tokens, JSON); checkout, returns, reviews and disputes open the web pages in an
-in-app browser so payments stay on the PCI-compliant Stripe flow.
+in-app browser so payments stay on the provider's hosted checkout (Chapa since Phase 13).
 
 ## Tests (Phase 12)
 
@@ -282,6 +276,39 @@ npm run db:deploy -w @marketplace/database   # or db:migrate in development
 npm run test:integration     # money flows against PostgreSQL
 npm run build -w @marketplace/web && npm run e2e -w @marketplace/web   # Playwright
 ```
+
+## Payments with Chapa (Phase 13)
+
+| Variable | Purpose |
+| --- | --- |
+| `CHAPA_SECRET_KEY` | Chapa secret key (`CHASECK_TEST-…` for test mode). Empty = payments and payouts are off. |
+| `CHAPA_WEBHOOK_SECRET` | Secret from Chapa's webhook settings; signs `/api/webhooks/chapa`. |
+| `CHAPA_API_URL` | Defaults to `https://api.chapa.co/v1`. |
+| `DATA_ENCRYPTION_KEY` | Now also needed by the **worker**: it decrypts payout account numbers. |
+
+How money moves:
+
+1. **Checkout.** `/checkout/pay/<order>` → "Pay with Chapa" creates a Payment with
+   `tx_ref = <order number>-<attempt>` and sends the buyer to Chapa. Chapa returns them to
+   `/checkout/return/<order>`, calls `/api/payments/chapa/callback`, and posts
+   `charge.*` webhooks. Each of these only triggers `confirmPayment`, which asks Chapa's verify
+   endpoint and applies the answer once. The order expiry sweep does the same before cancelling.
+2. **Escrow.** Unchanged: each store's share is held until delivery and the protection window.
+3. **Payouts.** Sellers save a bank account or wallet in Seller setup (bank list comes from
+   Chapa's `/banks`; the number is checked against the bank's length and stored encrypted). Every
+   10 minutes the worker sends each released escrow as a Chapa transfer with a unique reference,
+   then follows it until it lands (`payout.*` webhooks speed this up). A refused transfer is
+   reversed in the ledger and retried; three failures in a day, or a refusal about the account,
+   pause the store's payouts and tell the seller to check the account.
+4. **Refunds.** Returns, seller cancellations and dispute settlements call Chapa's refund API
+   with a reference derived from the business event, then the worker follows them to
+   `refunded` (or `reversed`). Chapa's own fees are not refunded to the platform.
+
+Testing locally: put test keys in `.env`, run `npm run dev` and the worker, and use Chapa's test
+payment details from their docs. Chapa cannot reach `localhost`, so for webhooks and callbacks use
+a tunnel (for example `cloudflared tunnel --url http://localhost:3000`) and set
+`NEXT_PUBLIC_APP_URL`/`AUTH_URL` to the tunnel address; the return page and the expiry sweep
+confirm payments without them.
 
 ## Deploying (when the domain is ready)
 
@@ -294,8 +321,10 @@ npm run build -w @marketplace/web && npm run e2e -w @marketplace/web   # Playwri
 3. On the server: copy `deploy/`, fill in `deploy/.env.production` from the example, then
    `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d`.
    Migrations run first; Caddy obtains HTTPS certificates.
-4. Stripe dashboard: webhooks to `https://<domain>/api/webhooks/stripe` (platform events) and
-   `/api/webhooks/stripe-connect` (connected accounts); put the signing secrets in the env file.
+4. Chapa dashboard: copy the live secret key into `CHAPA_SECRET_KEY`; under Settings → Webhooks
+   set the URL to `https://<domain>/api/webhooks/chapa` and copy its secret into
+   `CHAPA_WEBHOOK_SECRET`. Keep enough balance for seller payouts, and set transfer approval so
+   transfers created by the API are sent (see "Payments with Chapa").
 
 ## Running the worker (Phase 4)
 
@@ -349,13 +378,17 @@ with the ledger balanced and reconciled after every step) and all 18 end-to-end 
 
 ## Needs owner input
 
-- **Payments for Ethiopian sellers and buyers.** Sellers are onboarded with Stripe Connect
-  Express using *separate charges and transfers* (the flow escrow needs anyway). Stripe can pay
-  out to sellers in countries such as Ethiopia only through cross-border payouts, which require
-  the platform's Stripe account to be US-based (`STRIPE_PLATFORM_COUNTRY=US`). Buyers paying with
-  Telebirr / CBE Birr / Chapa would need a second payment provider. Decide: (a) register the
-  platform entity in the US and use Stripe for card payments, (b) add a Chapa adapter for
-  local ETB payments alongside Stripe, or (c) both. Default chosen: (a), Stripe only.
+- **Payments: decided.** The owner chose Chapa only, no Stripe (Phase 13). Before going live,
+  run one real test-mode payment, payout and refund: Chapa's public docs leave some response
+  fields undocumented (refund `ref_id`, transfer statuses), and the code reads them defensively.
+- **Chapa transfer approval.** If the Chapa account requires OTP approval for transfers, payouts
+  wait in Chapa until someone approves them. For automatic payouts, choose server approval or no
+  approval in Chapa's settings (an approval endpoint is not built).
+- **Card disputes.** Chapa does not report chargebacks to apps. If Chapa contacts you about one,
+  handle it with them; recording it in the resolution center is a manual follow-up (no staff tool
+  for it yet).
+- **Reversed refunds.** If Chapa reverses a refund, the money returns to the platform balance and
+  the refund is marked `REVERSED`; staff need to settle it with the buyer directly.
 - **Tax.** Configure the `tax_rates` table per destination country (for Ethiopia, the VAT
   rate and whether it applies to services and shipping), and decide who remits it. Default
   chosen: prices are tax-exclusive, tax is added at checkout and passed to the seller.
