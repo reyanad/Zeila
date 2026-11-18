@@ -42,13 +42,6 @@ enum StoreStatus {
   CLOSED
 }
 
-enum StripeOnboardingStatus {
-  NOT_STARTED
-  IN_PROGRESS
-  COMPLETE
-  RESTRICTED
-}
-
 enum ListingType {
   PHYSICAL
   DIGITAL
@@ -224,6 +217,14 @@ enum LedgerAccountType {
 enum LedgerDirection {
   DEBIT
   CREDIT
+}
+
+enum RefundStatus {
+  REQUESTED // recorded; the request to the payment provider is being sent
+  PROCESSING // accepted by the provider, with the bank or wallet
+  REFUNDED // money is back with the buyer
+  REVERSED // the provider could not complete it; the money returned to the platform balance
+  FAILED // the provider refused the request
 }
 
 enum PayoutStatus {
@@ -478,28 +479,33 @@ model Address {
 // ============================================================================
 
 model Store {
-  id                    String                 @id @default(cuid())
-  sellerId              String                 @unique
-  slug                  String                 @unique
-  name                  String
-  tagline               String?
-  description           String?
-  logoKey               String?
-  bannerKey             String?
-  status                StoreStatus            @default(DRAFT)
-  country               String
-  currency              String                 @default("USD")
-  commissionBpsOverride Int? // overrides PLATFORM_FEE_BPS when set
-  stripeAccountId       String?                @unique
-  stripeOnboarding      StripeOnboardingStatus @default(NOT_STARTED)
-  payoutsEnabled        Boolean                @default(false)
-  chargesEnabled        Boolean                @default(false)
-  vacationMode          Boolean                @default(false)
+  id                     String      @id @default(cuid())
+  sellerId               String      @unique
+  slug                   String      @unique
+  name                   String
+  tagline                String?
+  description            String?
+  logoKey                String?
+  bannerKey              String?
+  status                 StoreStatus @default(DRAFT)
+  country                String
+  currency               String      @default("USD")
+  commissionBpsOverride  Int? // overrides PLATFORM_FEE_BPS when set
+  // Where Chapa sends this store's earnings: a bank account or a mobile wallet
+  // (telebirr, CBE Birr, M-Pesa). payoutBankId is Chapa's bank id (bank_code).
+  payoutBankId           Int?
+  payoutBankName         String?
+  payoutAccountName      String?
+  payoutAccountNumber    String? // AES-256-GCM ciphertext
+  payoutAccountLast4     String?
+  payoutAccountUpdatedAt DateTime?
+  payoutsEnabled         Boolean     @default(false)
+  vacationMode           Boolean     @default(false)
   // {domestic:{base,perKg}, international:{base,perKg}|null, freeOverDomestic, handlingDays}
   // in the store currency (minor units); validated by shippingProfileSchema.
-  shippingProfile       Json?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  shippingProfile        Json?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
 
   seller         User            @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   warehouses     Warehouse[]
@@ -966,16 +972,19 @@ model OrderItem {
 }
 
 model Payment {
-  id                    String        @id @default(cuid())
-  orderId               String
-  stripePaymentIntentId String        @unique
-  stripeChargeId        String?
-  amount                Int
-  currency              String
-  status                PaymentStatus @default(PROCESSING)
-  failureReason         String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  id                String        @id @default(cuid())
+  orderId           String
+  provider          String        @default("chapa")
+  providerRef       String        @unique // tx_ref we send to Chapa, one per payment attempt
+  providerReference String? // Chapa's own reference for the charge
+  method            String? // how the buyer paid, e.g. telebirr, cbebirr, card
+  checkoutUrl       String?
+  amount            Int
+  currency          String
+  status            PaymentStatus @default(PROCESSING)
+  failureReason     String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   order   Order    @relation(fields: [orderId], references: [id], onDelete: Restrict)
   refunds Refund[]
@@ -984,34 +993,42 @@ model Payment {
 }
 
 model Refund {
-  id             String   @id @default(cuid())
-  paymentId      String
-  stripeRefundId String   @unique
-  amount         Int
-  reason         String?
-  createdAt      DateTime @default(now())
+  id               String       @id @default(cuid())
+  paymentId        String
+  reference        String       @unique // our key for the refund event, e.g. "rf-<hash>"
+  requestReference String // reference sent to Chapa (changes when a failed request is retried)
+  providerRefundId String?      @unique // Chapa ref_id
+  amount           Int
+  reason           String?
+  status           RefundStatus @default(REQUESTED)
+  failureReason    String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
 
   @@index([paymentId])
+  @@index([status])
 }
 
 model Escrow {
-  id               String       @id @default(cuid())
-  subOrderId       String       @unique
-  amount           Int // gross held for the seller (before platform fee)
-  released         Int          @default(0)
-  refunded         Int          @default(0)
-  status           EscrowStatus @default(HELD)
-  holdUntil        DateTime // auto-release eligibility time
-  releasedAt       DateTime?
-  stripeTransferId String?      @unique
-  frozenAt         DateTime?
-  frozenReason     String?
+  id           String       @id @default(cuid())
+  subOrderId   String       @unique
+  amount       Int // gross held for the seller (before platform fee)
+  released     Int          @default(0)
+  refunded     Int          @default(0)
+  status       EscrowStatus @default(HELD)
+  holdUntil    DateTime // auto-release eligibility time
+  releasedAt   DateTime?
+  payoutId     String? // the Chapa transfer that paid the store; null until paid out
+  frozenAt     DateTime?
+  frozenReason String?
 
   subOrder SubOrder @relation(fields: [subOrderId], references: [id], onDelete: Restrict)
+  payout   Payout?  @relation(fields: [payoutId], references: [id], onDelete: SetNull)
 
   @@index([status, holdUntil])
+  @@index([payoutId])
 }
 
 // --- Service fulfillment -----------------------------------------
@@ -1136,7 +1153,7 @@ model LedgerAccount {
 
 model JournalEntry {
   id             String   @id @default(cuid())
-  idempotencyKey String   @unique // e.g. "stripe:evt_123", "escrow-release:<subOrderId>"
+  idempotencyKey String   @unique // e.g. "payment:<orderId>", "escrow-release:<escrowId>"
   description    String
   // immutable: rows are never updated or deleted; corrections are new entries
   occurredAt     DateTime @default(now())
@@ -1163,18 +1180,23 @@ model LedgerLine {
 }
 
 model Payout {
-  id             String       @id @default(cuid())
-  storeId        String
-  amount         Int
-  currency       String
-  status         PayoutStatus @default(PENDING)
-  stripePayoutId String?      @unique
-  arrivalAt      DateTime?
-  failureReason  String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                 String       @id @default(cuid())
+  storeId            String
+  amount             Int
+  currency           String
+  status             PayoutStatus @default(PENDING)
+  reference          String       @unique // sent to Chapa as the transfer reference
+  providerTransferId String?      @unique // Chapa's id for the queued transfer
+  bankName           String?
+  accountLast4       String?
+  paidAt             DateTime?
+  arrivalAt          DateTime?
+  failureReason      String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
 
-  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  store   Store    @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  escrows Escrow[]
 
   @@index([storeId, status])
 }
@@ -1184,24 +1206,24 @@ model Payout {
 // ============================================================================
 
 model Dispute {
-  id              String        @id @default(cuid())
-  subOrderId      String
-  orderItemId     String?
-  openedById      String
-  reason          DisputeReason
-  description     String
-  evidence        Json          @default("[]") // [{key, fileName, note}]
-  kind            DisputeKind   @default(CLAIM)
-  stripeDisputeId String?
-  respondBy       DateTime? // the party the dispute is waiting for answers by then
-  evidenceDueBy   DateTime? // chargebacks: Stripe evidence deadline
-  status          DisputeStatus @default(OPEN)
-  resolution      String?
-  refundAmount    Int?
-  resolvedById    String?
-  resolvedAt      DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  subOrderId     String
+  orderItemId    String?
+  openedById     String
+  reason         DisputeReason
+  description    String
+  evidence       Json          @default("[]") // [{key, fileName, note}]
+  kind           DisputeKind   @default(CLAIM)
+  providerCaseId String? // payment provider's case id for card disputes (chargebacks)
+  respondBy      DateTime? // the party the dispute is waiting for answers by then
+  evidenceDueBy  DateTime? // chargebacks: the provider's evidence deadline
+  status         DisputeStatus @default(OPEN)
+  resolution     String?
+  refundAmount   Int?
+  resolvedById   String?
+  resolvedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   subOrder   SubOrder         @relation(fields: [subOrderId], references: [id], onDelete: Cascade)
   orderItem  OrderItem?       @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
@@ -1209,7 +1231,7 @@ model Dispute {
   resolvedBy User?            @relation("DisputeResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
   messages   DisputeMessage[]
 
-  @@unique([stripeDisputeId, subOrderId])
+  @@unique([providerCaseId, subOrderId])
   @@index([status, createdAt])
   @@index([subOrderId])
 }
@@ -1407,14 +1429,14 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 }
 
-// Idempotent inbox for external webhook deliveries (Stripe platform + Connect).
+// Idempotent inbox for external webhook deliveries (Chapa).
 // A delivery is inserted once per (provider, eventId); retries of an already
 // PROCESSED/IGNORED event are acknowledged without re-running handlers.
 model WebhookEvent {
   id          String             @id @default(cuid())
-  provider    String // "stripe" | "stripe-connect"
-  eventId     String // provider's event id, e.g. evt_...
-  type        String // e.g. "account.updated"
+  provider    String // "chapa"
+  eventId     String // a hash of the delivered body (Chapa events carry no id of their own)
+  type        String // e.g. "charge.success", "payout.success"
   accountId   String? // connected account the event belongs to, if any
   status      WebhookEventStatus @default(RECEIVED)
   attempts    Int                @default(0)
