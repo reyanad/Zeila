@@ -9,6 +9,7 @@ import { recordAudit } from "@/lib/audit";
 import { getEnv, githubOAuth, googleOAuth, superAdminEmails } from "@/lib/env";
 import { createAuthAdapter, upsertOauthAccount } from "./adapter";
 import { completeTicketLogin, issueLoginTicket, TicketLoginError } from "./login";
+import { githubEmailIsVerified } from "./github-email";
 
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
@@ -111,6 +112,9 @@ export function getAuthOptions(): NextAuthOptions {
         const email = user.email?.toLowerCase();
         if (!email) return "/login?error=OAuthEmailMissing";
         if (account.provider === "google" && (profile as { email_verified?: boolean } | undefined)?.email_verified !== true) {
+          return "/login?error=OAuthEmailUnverified";
+        }
+        if (account.provider === "github" && !(await githubEmailIsVerified(account.access_token, email))) {
           return "/login?error=OAuthEmailUnverified";
         }
 
