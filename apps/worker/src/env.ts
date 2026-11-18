@@ -15,7 +15,12 @@ const schema = z.object({
   EMBEDDINGS_API_URL: optional,
   EMBEDDINGS_API_KEY: optional,
   EMBEDDINGS_MODEL: z.string().default("text-embedding-3-small"),
-  STRIPE_SECRET_KEY: optional,
+  // Chapa secret key (CHASECK_TEST-... in test mode). Without it no payouts are sent.
+  CHAPA_SECRET_KEY: optional,
+  CHAPA_API_URL: z.string().url().default("https://api.chapa.co/v1"),
+  // Decrypts sellers' payout account numbers (same key as the web app).
+  DATA_ENCRYPTION_KEY: optional,
+  AUTH_SECRET: optional,
   FX_RATES_URL: z.string().url().default("https://open.er-api.com/v6/latest/USD"),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   RESEND_API_KEY: optional,

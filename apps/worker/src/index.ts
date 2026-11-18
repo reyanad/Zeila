@@ -1,7 +1,15 @@
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
-import Stripe from "stripe";
-import { expireStaleOrders, processDisputeDeadlines, releaseEligibleEscrows, settleReferrals, transferPendingPayouts } from "@marketplace/core";
+import {
+  createChapaGateway,
+  expireStaleOrders,
+  processDisputeDeadlines,
+  reconcilePayouts,
+  reconcileRefunds,
+  releaseEligibleEscrows,
+  settleReferrals,
+  transferPendingPayouts,
+} from "@marketplace/core";
 import { prisma } from "@marketplace/database";
 import { DEFAULT_JOB_OPTIONS, QUEUE_NAMES, WORKER_REDIS_OPTIONS, type MaintenanceJob, type NotificationJob, type SearchJob } from "@marketplace/jobs";
 import { createSearchClient, ensureListingsIndex } from "@marketplace/search";
@@ -12,7 +20,7 @@ import { searchProcessor } from "./jobs/search";
 
 /**
  * Background worker: search index and embeddings, exchange rates, unpaid
- * order expiry, escrow release and payouts, dispute deadlines, and e-mail for
+ * order expiry, escrow release and Chapa payouts, dispute deadlines, and e-mail for
  * notifications and unread messages.
  */
 async function main(): Promise<void> {
@@ -36,7 +44,8 @@ async function main(): Promise<void> {
 
   const searchQueue = new Queue<SearchJob>(QUEUE_NAMES.search, { connection });
   const maintenanceQueue = new Queue<MaintenanceJob>(QUEUE_NAMES.maintenance, { connection });
-  const stripe = env.STRIPE_SECRET_KEY && !env.STRIPE_SECRET_KEY.endsWith("_xxx") ? new Stripe(env.STRIPE_SECRET_KEY, { maxNetworkRetries: 2 }) : null;
+  const chapa = env.CHAPA_SECRET_KEY ? createChapaGateway({ secretKey: env.CHAPA_SECRET_KEY, baseUrl: env.CHAPA_API_URL }) : null;
+  if (!chapa) console.warn("[worker] CHAPA_SECRET_KEY not set: unpaid orders with a payment attempt are kept, and sellers are not paid out");
   await maintenanceQueue.upsertJobScheduler(
     "expire-orders",
     { every: 5 * 60_000 },
@@ -63,15 +72,18 @@ async function main(): Promise<void> {
     async (job) => {
       switch (job.data.kind) {
         case "expire-orders": {
-          const cancelled = await expireStaleOrders(stripe, new Date());
+          const cancelled = await expireStaleOrders(chapa, new Date());
           return `expired ${cancelled} unpaid orders`;
         }
         case "release-escrow": {
           const now = new Date();
           const released = await releaseEligibleEscrows(now);
-          const transferred = stripe ? await transferPendingPayouts(stripe) : 0;
           const referrals = await settleReferrals(now);
-          return `released ${released} escrows, transferred ${transferred}${stripe ? "" : " (Stripe not configured)"}, referrals ${referrals.approved} approved / ${referrals.reversed} reversed`;
+          if (!chapa) return `released ${released} escrows (Chapa not configured: no payouts), referrals ${referrals.approved} approved / ${referrals.reversed} reversed`;
+          const queued = await transferPendingPayouts(chapa, now);
+          const checked = await reconcilePayouts(chapa, now);
+          const refunds = await reconcileRefunds(chapa);
+          return `released ${released} escrows, queued ${queued} payouts, checked ${checked}, refunds ${refunds.refunded} done / ${refunds.reversed} reversed, referrals ${referrals.approved} approved / ${referrals.reversed} reversed`;
         }
         case "disputes": {
           const result = await processDisputeDeadlines(new Date());
