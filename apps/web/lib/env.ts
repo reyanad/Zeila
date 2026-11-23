@@ -31,7 +31,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_DEFAULT_CURRENCY: z.string().default("USD"),
 
   RESEND_API_KEY: optionalString,
-  EMAIL_FROM: z.string().default("Zeila <no-reply@example.com>"),
+  EMAIL_FROM: z.string().default("Negadras <no-reply@example.com>"),
 
   // Chapa: secret key (CHASECK_TEST-... in test mode) and the webhook secret
   // set in the Chapa dashboard under Settings > Webhooks.

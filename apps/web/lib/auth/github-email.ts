@@ -9,7 +9,7 @@ export async function githubEmailIsVerified(accessToken: string | undefined, ema
   if (!accessToken) return false;
   try {
     const response = await fetchImpl("https://api.github.com/user/emails", {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json", "User-Agent": "zeila-auth" },
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json", "User-Agent": "negadras-auth" },
       signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) return false;

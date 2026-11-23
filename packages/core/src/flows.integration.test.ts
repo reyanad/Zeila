@@ -46,7 +46,7 @@ const gateway: PaymentGateway = {
   verifyTransfer: async () => ({ status: "success", message: null }),
   listBanks: async () => [{ id: 946, name: "Commercial Bank of Ethiopia", accountLength: 13, currency: "ETB", isMobileMoney: false }],
 };
-const urls = { returnUrl: "https://zeila.test/return", callbackUrl: "https://zeila.test/callback" };
+const urls = { returnUrl: "https://negadras.test/return", callbackUrl: "https://negadras.test/callback" };
 
 /** Pay an order the way production does: hosted checkout, then Chapa's verify endpoint confirms it. */
 async function pay(orderId: string): Promise<void> {
@@ -100,7 +100,7 @@ async function checkout(buyerId: string, lines: Array<{ listingId: string; skuId
 
 beforeAll(async () => {
   const user = (label: string, role: "BUYER" | "SELLER") =>
-    prisma.user.create({ data: { email: `${label}-${run}@test.zeila`, name: label, role, emailVerified: now, country: "ET" }, select: { id: true } });
+    prisma.user.create({ data: { email: `${label}-${run}@test.negadras`, name: label, role, emailVerified: now, country: "ET" }, select: { id: true } });
   ids.buyer = (await user("buyer", "BUYER")).id;
   ids.affiliateUser = (await user("affiliate", "BUYER")).id;
   ids.seller = (await user("seller", "SELLER")).id;
@@ -135,7 +135,7 @@ beforeAll(async () => {
   ids.sku = sku.id;
   ids.level = (await prisma.inventoryLevel.create({ data: { warehouseId: warehouse.id, skuId: sku.id, onHand: 10 } })).id;
   ids.digital = (await listing(ids.store, "DIGITAL", "Brewing guide", 30_000)).id;
-  await prisma.digitalAsset.create({ data: { listingId: ids.digital, price: 30_000, vaultKey: `digital/${run}/guide.bin`, fileName: "guide.pdf", sizeBytes: BigInt(1_000), checksumSha256: "0".repeat(64), licenseTemplate: "ZEILA-{{BLOCK4}}-{{BLOCK4}}", activationsLimit: 1 } });
+  await prisma.digitalAsset.create({ data: { listingId: ids.digital, price: 30_000, vaultKey: `digital/${run}/guide.bin`, fileName: "guide.pdf", sizeBytes: BigInt(1_000), checksumSha256: "0".repeat(64), licenseTemplate: "NEGADRAS-{{BLOCK4}}-{{BLOCK4}}", activationsLimit: 1 } });
   ids.service = (await listing(ids.servicesStore, "SERVICE", "Logo design", 500_000)).id;
   ids.tier = (await prisma.serviceTier.create({ data: { listingId: ids.service, level: "BASIC", title: "Basic", description: "One concept", price: 500_000, deliveryDays: 5, revisions: 1 } })).id;
 });
@@ -167,7 +167,7 @@ describe("checkout, payment and escrow", () => {
     const digital = subOrder.items.find((item) => item.listingType === "DIGITAL");
     expect(digital?.status).toBe("DELIVERED");
     const key = digital?.licenseKey?.key ?? "";
-    expect(key).toMatch(/^ZEILA-/);
+    expect(key).toMatch(/^NEGADRAS-/);
     expect((await activateLicense(key, "device-one-fingerprint", "Laptop", null, new Date())).ok).toBe(true);
     const second = await activateLicense(key, "device-two-fingerprint", "Phone", null, new Date());
     expect(second.ok ? null : second.code).toBe("LIMIT_REACHED");

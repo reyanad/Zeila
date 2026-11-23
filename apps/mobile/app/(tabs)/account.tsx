@@ -1,4 +1,5 @@
 import { ScrollView, Text } from "react-native";
+import { POWERED_BY } from "@marketplace/shared-types";
 import { useAuth } from "@/auth";
 import { openWeb } from "@/links";
 import { SignInPrompt } from "@/sign-in-prompt";
@@ -28,6 +29,9 @@ export default function AccountScreen() {
       <Button label="Notification settings" variant="outline" onPress={() => void openWeb("/notifications")} />
       <Button label="Security and two-factor" variant="outline" onPress={() => void openWeb("/account/security")} />
       <Button label="Sign out" variant="danger" onPress={() => void signOut()} />
+      <Body muted style={{ textAlign: "center", fontSize: 12, marginTop: 8 }}>
+        {POWERED_BY}
+      </Body>
     </ScrollView>
   );
 }

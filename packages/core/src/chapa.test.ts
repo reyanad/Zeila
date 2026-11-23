@@ -81,9 +81,9 @@ describe("Chapa client", () => {
       firstName: "Hana",
       lastName: "Tesfaye",
       phone: "0911234567",
-      callbackUrl: "https://zeila.test/cb",
-      returnUrl: "https://zeila.test/return",
-      title: "Zeila marketplace checkout",
+      callbackUrl: "https://negadras.test/cb",
+      returnUrl: "https://negadras.test/return",
+      title: "Negadras marketplace checkout",
       description: "Order MP-20261118-ABC123 (2 items)",
     });
     expect(result.checkoutUrl).toBe("https://checkout.chapa.co/checkout/payment/abc");

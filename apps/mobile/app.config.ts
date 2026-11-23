@@ -5,14 +5,14 @@ import type { ExpoConfig } from "expo/config";
  * EXPO_PUBLIC_EAS_PROJECT_ID: needed for push notifications on real devices.
  */
 const config: ExpoConfig = {
-  name: "Zeila",
-  slug: "zeila",
-  scheme: "zeila",
+  name: "Negadras",
+  slug: "negadras",
+  scheme: "negadras",
   version: "1.0.0",
   orientation: "portrait",
   userInterfaceStyle: "automatic",
-  ios: { bundleIdentifier: "com.zeila.app", supportsTablet: true },
-  android: { package: "com.zeila.app" },
+  ios: { bundleIdentifier: "com.zeila.negadras", supportsTablet: true },
+  android: { package: "com.zeila.negadras" },
   plugins: [
     "expo-router",
     "expo-secure-store",

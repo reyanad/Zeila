@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@marketplace/database";
+import { APP_NAME } from "@marketplace/shared-types";
 import { CheckoutError } from "./errors";
 import { decryptAtRest } from "./field-crypto";
 import type { PaymentGateway } from "./gateway";
@@ -229,7 +230,7 @@ async function failPayout(payoutId: string, reason: string, accountProblem: bool
       userId: outcome.sellerId,
       type: "PAYOUT_SENT",
       title: "Your payout could not be sent",
-      body: "Chapa could not deliver your earnings to the account on file. Check your payout account in Seller setup; your money stays safe on Zeila until then.",
+      body: `Chapa could not deliver your earnings to the account on file. Check your payout account in Seller setup; your money stays safe on ${APP_NAME} until then.`,
       href: "/seller/onboarding",
     });
   }

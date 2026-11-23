@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { prisma } from "@marketplace/database";
+import { APP_NAME } from "@marketplace/shared-types";
 import { cardFromRow, listingCardSelect, publicListingWhere } from "@marketplace/search";
 import { Countdown } from "@/components/growth/countdown";
 import { ListingGrid } from "@/components/storefront/listing-card";
 import { getFxRates, getViewerCurrency } from "@/lib/storefront/fx";
 
-export const metadata: Metadata = { title: "Flash deals", description: "Time-limited discounts from sellers across Zeila." };
+export const metadata: Metadata = { title: "Flash deals", description: `Time-limited discounts from sellers across ${APP_NAME}.` };
 export const dynamic = "force-dynamic";
 
 export default async function DealsPage() {
