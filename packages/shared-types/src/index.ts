@@ -94,7 +94,10 @@ export interface CursorPage<T> {
 // Platform constants
 // ---------------------------------------------------------------------------
 
-export const APP_NAME = "Zeila";
+export const APP_NAME = "Negadras";
+/** The company behind Negadras and its sister products. */
+export const COMPANY_NAME = "Zeila";
+export const POWERED_BY = `Powered by ${COMPANY_NAME}`;
 export const DEFAULT_PLATFORM_FEE_BPS = 500; // 5%
 export const DEFAULT_ESCROW_HOLD_DAYS = 3;
 export const DEFAULT_LICENSE_ACTIVATIONS = 3;

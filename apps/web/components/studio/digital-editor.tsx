@@ -164,7 +164,7 @@ export function DigitalEditor({ currency }: { currency: string }) {
               <TextField
                 id="licence-prefix"
                 label="Key prefix (optional)"
-                placeholder="ZEILA"
+                placeholder="NEGADRAS"
                 maxLength={10}
                 value={digital.licensePrefix}
                 onChange={(event) => update({ licensePrefix: event.currentTarget.value.toUpperCase() })}

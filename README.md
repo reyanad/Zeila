@@ -1,6 +1,7 @@
-# Marketplace
+# Negadras
 
-All-in-one multi-vendor marketplace combining:
+*Powered by Zeila.* Negadras (ነጋድራስ) is Zeila's marketplace: an all-in-one multi-vendor
+marketplace combining:
 
 - **Physical e-commerce** — multi-warehouse inventory, SKU variant matrices, wholesale
   MOQ tiers, carrier tracking, RMA returns.

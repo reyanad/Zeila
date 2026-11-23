@@ -24,7 +24,7 @@ const LINK = /\b(?:https?:\/\/)?(?:www\.)?(?:t\.me|telegram\.(?:me|org)|wa\.me|c
 const HANDLE = /(?:^|\s)@[a-z0-9_]{4,32}\b/gi;
 const APP = /\b(?:whats\s?app|telegram|viber|signal\s+me|imo\s+(?:me|number)|skype|wechat|snapchat)\b|ቴሌግራም|ዋትሳፕ|ዋትስአፕ|ቫይበር/gi;
 const PAYMENT =
-  /\b(?:tele\s?birr|cbe\s?birr|m-?pesa|paypal|western\s?union|moneygram|payoneer|bank\s+(?:transfer|account)|account\s+number|pay\s+(?:me\s+)?(?:directly|outside|in\s+cash|off[-\s]?(?:platform|site|app))|outside\s+(?:the\s+|of\s+)?(?:app|platform|site|zeila)|cash\s+on\s+delivery|bitcoin|usdt|crypto\s?(?:currency|wallet)?)\b|ቴሌብር|ሲቢኢ\s?ብር|የባንክ\s?ሂሳብ|በቀጥታ\s?ክፈል/gi;
+  /\b(?:tele\s?birr|cbe\s?birr|m-?pesa|paypal|western\s?union|moneygram|payoneer|bank\s+(?:transfer|account)|account\s+number|pay\s+(?:me\s+)?(?:directly|outside|in\s+cash|off[-\s]?(?:platform|site|app))|outside\s+(?:the\s+|of\s+)?(?:app|platform|site|negadras|zeila)|cash\s+on\s+delivery|bitcoin|usdt|crypto\s?(?:currency|wallet)?)\b|ቴሌብር|ሲቢኢ\s?ብር|የባንክ\s?ሂሳብ|በቀጥታ\s?ክፈል/gi;
 
 export const HIDDEN_CONTACT = "[contact hidden]";
 

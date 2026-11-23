@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { prisma, type KycStatus, type StoreStatus } from "@marketplace/database";
-import { countryOptions } from "@marketplace/shared-types";
+import { APP_NAME, countryOptions } from "@marketplace/shared-types";
 import { Alert, Badge, type BadgeTone, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@marketplace/ui";
 import { CreateStoreForm } from "@/components/seller/create-store-form";
 import { KycForm } from "@/components/seller/kyc-form";
@@ -209,7 +209,7 @@ export default async function SellerOnboardingPage({
           <div className="flex flex-col gap-3">
             {payouts === "attention" ? (
               <Alert tone="danger" title="Your last payout could not be sent">
-                Check the account details below and save them again. Your earnings stay safe on Zeila until then.
+                Check the account details below and save them again. Your earnings stay safe on {APP_NAME} until then.
               </Alert>
             ) : null}
             <PayoutAccountForm banks={banks} saved={payouts === "attention" ? null : savedAccount} />

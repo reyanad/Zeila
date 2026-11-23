@@ -3,6 +3,8 @@
  * app uses for account e-mails). Without RESEND_API_KEY the message is
  * logged instead, which keeps development self-contained.
  */
+import { POWERED_BY } from "@marketplace/shared-types";
+
 export interface OutgoingEmail {
   to: string;
   subject: string;
@@ -26,8 +28,10 @@ export function renderEmail(email: OutgoingEmail, brand: string): { html: string
 ${body}
 <a href="${escapeHtml(email.actionUrl)}" style="display:inline-block;background:#18181b;color:#ffffff;text-decoration:none;padding:10px 18px;border-radius:8px;font-size:14px">${escapeHtml(email.actionLabel)}</a>
 <p style="margin:24px 0 0;color:#71717a;font-size:12px">You can turn these e-mails off in your notification settings.</p>
-</td></tr></table></td></tr></table></body></html>`;
-  const text = `${email.heading}\n\n${email.body ? `${email.body}\n\n` : ""}${email.actionLabel}: ${email.actionUrl}\n\nYou can turn these e-mails off in your notification settings.`;
+</td></tr></table>
+<p style="margin:16px 0 0;color:#a1a1aa;font-size:12px">${escapeHtml(brand)} · ${escapeHtml(POWERED_BY)}</p>
+</td></tr></table></body></html>`;
+  const text = `${email.heading}\n\n${email.body ? `${email.body}\n\n` : ""}${email.actionLabel}: ${email.actionUrl}\n\nYou can turn these e-mails off in your notification settings.\n\n${brand} · ${POWERED_BY}`;
   return { html, text };
 }
 

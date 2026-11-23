@@ -2,7 +2,7 @@
 # automatically for DOMAIN and the realtime subdomain.
 #   cp deploy/.env.production.example deploy/.env.production   # fill it in
 #   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d
-name: zeila
+name: negadras
 
 x-app-env: &app-env
   env_file: .env.production
@@ -38,7 +38,7 @@ services:
 
   migrate:
     <<: *app-env
-    image: ghcr.io/${GITHUB_OWNER}/zeila-worker:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_OWNER}/negadras-worker:${IMAGE_TAG:-latest}
     restart: "no"
     working_dir: /app/packages/database
     command: ["npx", "prisma", "migrate", "deploy"]
@@ -47,7 +47,7 @@ services:
 
   web:
     <<: *app-env
-    image: ghcr.io/${GITHUB_OWNER}/zeila-web:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_OWNER}/negadras-web:${IMAGE_TAG:-latest}
     volumes: [uploads:/app/.data]
     depends_on:
       migrate: { condition: service_completed_successfully }
@@ -55,13 +55,13 @@ services:
 
   worker:
     <<: *app-env
-    image: ghcr.io/${GITHUB_OWNER}/zeila-worker:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_OWNER}/negadras-worker:${IMAGE_TAG:-latest}
     depends_on:
       migrate: { condition: service_completed_successfully }
 
   realtime:
     <<: *app-env
-    image: ghcr.io/${GITHUB_OWNER}/zeila-realtime:${IMAGE_TAG:-latest}
+    image: ghcr.io/${GITHUB_OWNER}/negadras-realtime:${IMAGE_TAG:-latest}
     depends_on: [redis]
 
   caddy:

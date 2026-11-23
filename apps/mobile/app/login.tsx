@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView } from "react-native";
+import { POWERED_BY } from "@marketplace/shared-types";
 import { ApiError } from "@/api";
 import { useAuth } from "@/auth";
 import { openWeb } from "@/links";
@@ -61,6 +62,9 @@ export default function LoginScreen() {
             <Button label="Forgot your password?" variant="outline" onPress={() => void openWeb("/forgot-password")} />
           </>
         ) : null}
+        <Body muted style={{ textAlign: "center", fontSize: 12, marginTop: 8 }}>
+          {POWERED_BY}
+        </Body>
       </ScrollView>
     </KeyboardAvoidingView>
   );

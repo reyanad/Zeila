@@ -3,8 +3,8 @@ import * as SecureStore from "expo-secure-store";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, ApiError, type LoginResponse } from "./api";
 
-const TOKEN_KEY = "zeila.session";
-const PUSH_KEY = "zeila.push";
+const TOKEN_KEY = "negadras.session";
+const PUSH_KEY = "negadras.push";
 
 interface AuthUser {
   id: string;

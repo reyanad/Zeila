@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "@marketplace/database";
+import { APP_NAME } from "@marketplace/shared-types";
 import { ListingGrid } from "@/components/storefront/listing-card";
 import { Pagination } from "@/components/storefront/pagination";
 import { SearchFilters } from "@/components/storefront/search-filters";
@@ -25,7 +26,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!store) return { title: "Store not found" };
   return {
     title: store.name,
-    description: store.tagline ?? `Shop ${store.name} on Zeila.`,
+    description: store.tagline ?? `Shop ${store.name} on ${APP_NAME}.`,
     alternates: { canonical: siteUrl(`/store/${store.slug}`) },
   };
 }

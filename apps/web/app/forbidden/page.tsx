@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { APP_NAME } from "@marketplace/shared-types";
 import { buttonVariants, Card, CardContent, CardDescription, CardHeader, CardTitle } from "@marketplace/ui";
 
 export const metadata: Metadata = { title: "Access denied", robots: { index: false, follow: false } };
@@ -11,7 +12,7 @@ export default function ForbiddenPage() {
         <CardHeader>
           <CardTitle>You do not have access to this page</CardTitle>
           <CardDescription>
-            Your account does not have the role this area requires. If you think that is a mistake, contact the Zeila team.
+            Your account does not have the role this area requires. If you think that is a mistake, contact the {APP_NAME} team.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex gap-3">

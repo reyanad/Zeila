@@ -140,6 +140,12 @@ split orders, Chapa payments with escrow and seller payouts, double-entry ledger
       when a transfer fails. Refunds go through Chapa's refund API once per business event. Stores
       sell in ETB. Also: the Zeila name replaces "Marketplace", GitHub sign-in links only
       GitHub-verified e-mails, and the Vendor Studio pages no longer crash.
+- [x] **Rename to Negadras** (owner's decision, Nov 2026): the marketplace is now called
+      Negadras (ነጋድራስ). Zeila is the company behind it and its sister products, credited as
+      "Powered by Zeila" in the site footer, every e-mail and the mobile app's sign-in and account
+      screens. The name lives in `APP_NAME`, the company in `COMPANY_NAME`
+      (`packages/shared-types`). The mobile app id is `com.zeila.negadras`, its link scheme
+      `negadras://`, and the Docker images are `negadras-{web,worker,realtime}`.
 
 ## Local setup (after Phase 1)
 
@@ -316,7 +322,7 @@ confirm payments without them.
    `www` and `rt` (realtime) pointing at it.
 2. In GitHub: Settings → Variables → `PUBLIC_APP_URL=https://<domain>` and
    `PUBLIC_REALTIME_URL=https://rt.<domain>`; the next green CI run on `main` publishes images to
-   `ghcr.io/<owner>/zeila-{web,worker,realtime}` (make the packages public or `docker login ghcr.io`
+   `ghcr.io/<owner>/negadras-{web,worker,realtime}` (make the packages public or `docker login ghcr.io`
    on the server).
 3. On the server: copy `deploy/`, fill in `deploy/.env.production` from the example, then
    `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.production up -d`.

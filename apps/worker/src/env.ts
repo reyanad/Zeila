@@ -25,9 +25,9 @@ const schema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
   RESEND_API_KEY: optional,
   EXPO_ACCESS_TOKEN: optional,
-  EMAIL_FROM: z.string().default("Zeila <no-reply@example.com>"),
+  EMAIL_FROM: z.string().default("Negadras <no-reply@example.com>"),
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
-  APP_NAME: z.string().default("Zeila"),
+  APP_NAME: z.string().default("Negadras"),
 });
 
 export type WorkerEnv = z.infer<typeof schema>;

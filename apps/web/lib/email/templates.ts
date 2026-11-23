@@ -1,5 +1,5 @@
 import "server-only";
-import { APP_NAME } from "@marketplace/shared-types";
+import { APP_NAME, POWERED_BY } from "@marketplace/shared-types";
 import type { EmailMessage } from "./send";
 
 const BRAND = APP_NAME;
@@ -33,8 +33,17 @@ function layout({ heading, paragraphs, action, footnote }: LayoutParams): { html
     `<!doctype html><html><body style="margin:0;padding:24px;background:#f5f6f8;font-family:Arial,Helvetica,sans-serif;color:#1d2433">` +
     `<div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:10px;padding:32px">` +
     `<p style="margin:0 0 24px;font-weight:700;font-size:15px;color:#2456d6">${BRAND}</p>` +
-    `<h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(heading)}</h1>${body}${button}${foot}</div></body></html>`;
-  const text = [heading, "", ...paragraphs, ...(action ? ["", `${action.label}: ${action.url}`] : []), ...(footnote ? ["", footnote] : [])].join("\n");
+    `<h1 style="margin:0 0 16px;font-size:20px">${escapeHtml(heading)}</h1>${body}${button}${foot}</div>` +
+    `<p style="max-width:520px;margin:16px auto 0;font-size:12px;color:#98a2b3;text-align:center">${escapeHtml(BRAND)} · ${escapeHtml(POWERED_BY)}</p></body></html>`;
+  const text = [
+    heading,
+    "",
+    ...paragraphs,
+    ...(action ? ["", `${action.label}: ${action.url}`] : []),
+    ...(footnote ? ["", footnote] : []),
+    "",
+    `${BRAND} · ${POWERED_BY}`,
+  ].join("\n");
   return { html, text };
 }
 
